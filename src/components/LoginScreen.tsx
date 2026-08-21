@@ -7,6 +7,8 @@ import {
   signInWithGoogle,
   requestPasswordReset,
   removeStoredAccount,
+  getDomainHelpMessage,
+  DomainHelpMessage,
 } from '../services/firebaseService';
 
 interface LoginScreenProps {
@@ -101,6 +103,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [showForgotPassword, setShowForgotPassword] = useState<boolean>(false);
   const [showItHelp, setShowItHelp] = useState<boolean>(false);
+  const [domainHelpInfo, setDomainHelpInfo] = useState<DomainHelpMessage | null>(null);
   const [resetEmail, setResetEmail] = useState<string>('');
   const [resetSent, setResetSent] = useState<boolean>(false);
 
@@ -245,6 +248,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   // Google Sign In Handler
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
+    setDomainHelpInfo(null);
     const res = await signInWithGoogle();
     setIsLoading(false);
     if (res.success && res.user) {
@@ -269,7 +273,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         setRegAvatar(res.googlePhoto);
       }
     } else {
-      if (res.error && res.error !== 'ยกเลิกการเลือกบัญชี Google') {
+      const help = getDomainHelpMessage(res.error);
+      if (help) {
+        setDomainHelpInfo(help);
+        showToast('Google OAuth มีข้อจำกัดด้านโดเมนความปลอดภัย', 'error');
+      } else if (res.error && res.error !== 'ยกเลิกการเลือกบัญชี Google') {
         showToast(res.error, 'error');
       }
     }
@@ -468,6 +476,63 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Domain Restriction Graceful Guidance Banner */}
+        {domainHelpInfo && (
+          <div className="w-full mb-4 p-4 rounded-2xl bg-amber-50/95 border border-amber-200 text-amber-950 shadow-xs backdrop-blur-sm animate-fadeIn">
+            <div className="flex items-start gap-3">
+              <span className="material-symbols-outlined text-amber-600 text-xl shrink-0 mt-0.5">
+                domain_disabled
+              </span>
+              <div className="flex-1">
+                <h4 className="text-xs font-bold text-amber-900 mb-1">
+                  {domainHelpInfo.title}
+                </h4>
+                <p className="text-[11px] text-amber-800 leading-relaxed mb-1.5">
+                  {domainHelpInfo.message}
+                </p>
+                <p className="text-[10px] text-amber-700/90 leading-relaxed mb-3">
+                  {domainHelpInfo.tierInfo} • {domainHelpInfo.suggestedAction}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {domainHelpInfo.alternativeOptions.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setDomainHelpInfo(null);
+                        if (opt.actionType === 'signin_password') {
+                          setAuthMode('signin');
+                          const inputEl = document.getElementById('identifier') as HTMLInputElement;
+                          if (inputEl) inputEl.focus();
+                        } else if (opt.actionType === 'signup_new') {
+                          setAuthMode('signup');
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                        opt.actionType === 'signin_password'
+                          ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-xs'
+                          : 'bg-white hover:bg-amber-100 border border-amber-300 text-amber-900'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[14px]">
+                        {opt.actionType === 'signin_password' ? 'login' : 'person_add'}
+                      </span>
+                      <span>{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDomainHelpInfo(null)}
+                className="text-amber-500 hover:text-amber-700 text-sm font-bold cursor-pointer p-1"
+              >
+                ✕
+              </button>
+            </div>
           </div>
         )}
 

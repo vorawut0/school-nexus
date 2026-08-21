@@ -1033,6 +1033,61 @@ export async function checkGoogleEmailRegistered(email: string, uid?: string): P
   }
 }
 
+export interface DomainHelpMessage {
+  isDomainError: boolean;
+  domain: string;
+  title: string;
+  message: string;
+  tierInfo: string;
+  suggestedAction: string;
+  alternativeOptions: Array<{
+    id: string;
+    label: string;
+    actionType: 'signin_password' | 'signup_new' | 'retry';
+  }>;
+}
+
+/**
+ * Detects domain-related authentication errors, explains AI Studio Starter tier limitations,
+ * and generates a formatted structured object for the UI to display.
+ */
+export function getDomainHelpMessage(error: any): DomainHelpMessage | null {
+  const errCode = error?.code || '';
+  const errMsg = error?.message || (typeof error === 'string' ? error : '');
+  const isDomainError =
+    errCode === 'auth/unauthorized-domain' ||
+    errMsg.includes('unauthorized-domain') ||
+    errMsg.includes('auth/unauthorized-domain') ||
+    errMsg.includes('โดเมนปัจจุบันยังไม่ได้เปิดใช้งาน OAuth');
+
+  if (!isDomainError) {
+    return null;
+  }
+
+  const currentDomain = typeof window !== 'undefined' ? window.location.hostname : 'vorawut0.github.io';
+
+  return {
+    isDomainError: true,
+    domain: currentDomain,
+    title: 'ข้อจำกัดโดเมนความปลอดภัย Google OAuth',
+    message: `โดเมน ${currentDomain} ยังไม่ได้อยู่ในรายการ Authorized Domains ของ Firebase Authentication`,
+    tierInfo: 'เนื่องจากโปรเจกต์นี้อยู่ในสภาพแวดล้อม AI Studio Starter tier ทำให้ไม่สามารถเพิ่มโดเมนภายนอกผ่านคอนโซลโดยตรงได้',
+    suggestedAction: 'แนะนำให้เข้าสู่ระบบด้วยชื่อผู้ใช้/อีเมลและรหัสผ่าน หรือลงทะเบียนบัญชีใหม่',
+    alternativeOptions: [
+      {
+        id: 'pwd_login',
+        label: 'เข้าสู่ระบบด้วยรหัสผ่าน (Email / ID)',
+        actionType: 'signin_password',
+      },
+      {
+        id: 'new_signup',
+        label: 'ลงทะเบียนบัญชีใหม่',
+        actionType: 'signup_new',
+      },
+    ],
+  };
+}
+
 // Google Sign-In with Popup - Ultra-fast verification with forced Account Chooser
 export async function signInWithGoogle(): Promise<{
   success: boolean;
