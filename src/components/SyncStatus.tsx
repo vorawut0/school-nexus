@@ -165,7 +165,7 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({
             type="button"
             onClick={handleManualSync}
             disabled={isSyncing}
-            className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-2xs active:scale-90 cursor-pointer disabled:opacity-50"
+            className="hidden sm:flex p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-2xs active:scale-90 cursor-pointer disabled:opacity-50 items-center justify-center shrink-0"
             title="กดเพื่อซิงค์ข้อมูลไปยัง Firestore ทันที"
           >
             <span className={`material-symbols-outlined text-[14px] ${isSyncing ? 'animate-spin' : ''}`}>

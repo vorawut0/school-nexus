@@ -56,6 +56,7 @@ import {
   subscribeToRoomBookings,
   subscribeToAssignments,
   subscribeToNotifications,
+  subscribeToUserProfile,
   addRoomBookingToFirestore,
   updateRoomBookingInFirestore,
   deleteRoomBookingFromFirestore,
@@ -180,7 +181,34 @@ export default function App() {
 
   // Subscribe to real-time Firestore database
   useEffect(() => {
-    const unsubBookings = subscribeToRoomBookings(user?.id || 'sn-std-01', (bookings) => {
+    if (!user?.id) return;
+
+    const unsubUserProfile = subscribeToUserProfile(user.id, (updatedProfile) => {
+      if (updatedProfile) {
+        setUser((prev) => {
+          if (!prev) return updatedProfile;
+          // Only update if avatar or crucial fields changed to avoid unnecessary re-renders
+          if (
+            prev.avatar !== updatedProfile.avatar ||
+            prev.name !== updatedProfile.name ||
+            prev.thaiName !== updatedProfile.thaiName ||
+            prev.studentId !== updatedProfile.studentId ||
+            prev.gpa !== updatedProfile.gpa ||
+            prev.grade !== updatedProfile.grade ||
+            prev.department !== updatedProfile.department ||
+            prev.position !== updatedProfile.position
+          ) {
+            return {
+              ...prev,
+              ...updatedProfile,
+            };
+          }
+          return prev;
+        });
+      }
+    });
+
+    const unsubBookings = subscribeToRoomBookings(user.id || 'sn-std-01', (bookings) => {
       setRoomBookings(bookings);
     });
     const unsubAssignments = subscribeToAssignments((items) => {
@@ -217,6 +245,7 @@ export default function App() {
     });
 
     return () => {
+      unsubUserProfile();
       unsubBookings();
       unsubAssignments();
       unsubNotifs();
@@ -741,7 +770,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f9f9ff] text-[#121b2e] flex flex-col font-['Noto_Sans_Thai',sans-serif] selection:bg-[#1550d3] selection:text-white">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#f9f9ff] text-[#121b2e] flex flex-col font-['Noto_Sans_Thai',sans-serif] selection:bg-[#1550d3] selection:text-white">
       {/* Fixed Top Header */}
       <Header
         currentTab={currentTab}

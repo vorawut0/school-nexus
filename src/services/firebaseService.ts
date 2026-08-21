@@ -135,6 +135,44 @@ export function savePersistedAvatar(user: UserProfile): void {
 }
 
 // User Profile Firestore Services
+export function subscribeToUserProfile(
+  userId: string,
+  onUpdate: (user: UserProfile) => void
+): () => void {
+  if (!userId) return () => {};
+  const path = `users/${userId}`;
+
+  try {
+    const docRef = doc(db, 'users', userId);
+    const unsubscribe = onSnapshot(
+      docRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data() as UserProfile;
+          if (data) {
+            const resolvedUser: UserProfile = {
+              ...data,
+              id: data.id || userId,
+            };
+            if (resolvedUser.avatar) {
+              savePersistedAvatar(resolvedUser);
+            }
+            setLocalCache('user_profile', resolvedUser);
+            onUpdate(resolvedUser);
+          }
+        }
+      },
+      (error) => {
+        console.debug(`[Firestore subscribeToUserProfile] notice on ${path}:`, error);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return () => {};
+  }
+}
+
 export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
   const path = `users/${userId}`;
   try {

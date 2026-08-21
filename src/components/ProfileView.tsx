@@ -69,8 +69,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   });
 
   return (
-    <div className="flex flex-col w-full relative pb-20 sm:pb-24 pt-5 sm:pt-6 px-4 sm:px-6 max-w-[1280px] mx-auto min-h-screen">
-      <div className="flex flex-col gap-6 sm:gap-8">
+    <div className="flex flex-col w-full max-w-full overflow-x-hidden relative pb-20 sm:pb-24 pt-4 sm:pt-6 px-3 sm:px-6 max-w-[1280px] mx-auto min-h-screen">
+      <div className="flex flex-col gap-5 sm:gap-8 max-w-full">
         {/* Title Header */}
         <div className="flex justify-between items-center">
           <div className="flex flex-col gap-1">
