@@ -269,7 +269,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         setRegAvatar(res.googlePhoto);
       }
     } else {
-      showToast(res.error || 'การเข้าสู่ระบบด้วย Google ไม่สำเร็จ', 'error');
+      if (res.error && res.error !== 'ยกเลิกการเลือกบัญชี Google') {
+        showToast(res.error, 'error');
+      }
     }
   };
 
