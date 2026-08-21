@@ -5,6 +5,7 @@ import {
   subscribeToAllUsers,
   pushRealtimeNotification,
   addSystemLogInFirestore,
+  addSecurityAuditLog,
   getLocalCache,
 } from '../../services/firebaseService';
 
@@ -72,6 +73,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         level: 'alert',
         deviceOrGate: 'ALL-GATES-MASTER',
       });
+      addSecurityAuditLog({
+        actionType: 'lockdown_toggle',
+        severity: 'critical',
+        actorId: user.id,
+        actorName: user.thaiName || user.name,
+        actorRole: user.role,
+        targetName: 'Campus Security Master Lock',
+        details: `ผู้ดูแลระบบ ${user.thaiName} สั่งการ "ล็อกดาวน์ฉุกเฉินระดับสูง (Campus Emergency Lockdown)" ทั่วโรงเรียน`,
+      });
     } else {
       showToast('✅ ปลดล็อกระบบรักษาความปลอดภัย คืนสถานะการทำงานปกติทุกจุด');
       addSystemLogInFirestore({
@@ -80,6 +90,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         category: 'security',
         level: 'info',
         deviceOrGate: 'ALL-GATES-MASTER',
+      });
+      addSecurityAuditLog({
+        actionType: 'lockdown_toggle',
+        severity: 'high',
+        actorId: user.id,
+        actorName: user.thaiName || user.name,
+        actorRole: user.role,
+        targetName: 'Campus Security Master Lock',
+        details: `ผู้ดูแลระบบ ${user.thaiName} สั่ง "ยกเลิกล็อกดาวน์ฉุกเฉิน คืนสถานะการเปิดประตูปกติ"`,
       });
     }
   };
@@ -170,6 +189,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         category: 'system',
         level: 'info',
         deviceOrGate: 'CENTRAL-BROADCAST',
+      });
+
+      addSecurityAuditLog({
+        actionType: 'broadcast_sent',
+        severity: 'medium',
+        actorId: user.id,
+        actorName: user.thaiName || user.name,
+        actorRole: user.role,
+        targetName: `กลุ่มเป้าหมาย: ${broadcastTarget}`,
+        details: `ผู้ดูแลระบบส่งประกาศด่วน: "${broadcastTitle}" (เป้าหมาย: ${broadcastTarget === 'all' ? 'ทุกคน' : broadcastTarget})`,
       });
 
       setIsBroadcasting(false);

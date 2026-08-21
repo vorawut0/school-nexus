@@ -75,6 +75,7 @@ import {
   getStoredCustomPresets,
   getStoredAccounts,
   purgeAccountImmediately,
+  addSecurityAuditLog,
 } from './services/firebaseService';
 
 export default function App() {
@@ -385,6 +386,7 @@ export default function App() {
   };
 
   const handleSwitchRole = (role: UserRole) => {
+    const previousRole = user?.role;
     const registered = getStoredAccounts();
     const foundForRole = registered.find((a) => a.role === role);
     if (foundForRole) {
@@ -392,6 +394,20 @@ export default function App() {
       const updatedUser = customAvatar ? { ...foundForRole.user, avatar: customAvatar } : foundForRole.user;
       setUser(updatedUser);
       setCurrentTab('dashboard');
+
+      // Security Audit Log into Firebase 'audit_logs'
+      if (user) {
+        addSecurityAuditLog({
+          actionType: 'role_switch',
+          severity: role === 'admin' ? 'high' : 'medium',
+          actorId: user.id,
+          actorName: user.thaiName || user.name,
+          actorRole: previousRole || user.role,
+          targetId: updatedUser.id,
+          targetName: updatedUser.thaiName || updatedUser.name,
+          details: `ผู้ใช้ ${user.thaiName} สลับบทบาทจาก [${previousRole}] เป็น [${role}] (Account: ${updatedUser.id})`,
+        });
+      }
     } else {
       // If no account registered for this role yet, prompt user to login/register for that role
       try {
@@ -628,6 +644,20 @@ export default function App() {
       read: false,
     };
     addNotificationToFirestore(adminNotif);
+
+    // Record Critical Action to dedicated 'audit_logs' collection in Firebase
+    if (user) {
+      addSecurityAuditLog({
+        actionType: 'facility_booking',
+        severity: 'medium',
+        actorId: user.id,
+        actorName: user.thaiName || user.name,
+        actorRole: user.role,
+        targetId: newBooking.id,
+        targetName: newBooking.roomName,
+        details: `ผู้ใช้ ${user.thaiName} (${user.role}) ทำการจองห้อง "${newBooking.roomName}" สำหรับวันที่ ${newBooking.date} ช่วงเวลา ${newBooking.timeSlot} (PassCode: ${newBooking.passCode})`,
+      });
+    }
   };
 
   const handleUpdateAvatar = (newAvatarUrl: string) => {

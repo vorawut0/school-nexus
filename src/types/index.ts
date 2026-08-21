@@ -265,3 +265,20 @@ export interface NotificationItem {
   actionUrl?: string;
   actionLabel?: string;
 }
+
+export interface SecurityAuditLog {
+  id: string;
+  actionType: 'role_switch' | 'facility_booking' | 'user_created' | 'user_updated' | 'user_deleted' | 'lockdown_toggle' | 'broadcast_sent' | 'security_override' | 'permission_change';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  actorId: string;
+  actorName: string;
+  actorRole: UserRole;
+  targetId?: string;
+  targetName?: string;
+  details: string;
+  ipAddress?: string;
+  userAgent?: string;
+  timestamp: number;
+  timeIso: string;
+}
+

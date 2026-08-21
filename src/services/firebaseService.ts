@@ -20,7 +20,7 @@ import {
 } from 'firebase/auth';
 import { db, auth, googleProvider, handleFirestoreError, OperationType } from '../firebase';
 export { db, auth, googleProvider };
-import { UserProfile, UserRole, RoomBooking, Assignment, NotificationItem } from '../types';
+import { UserProfile, UserRole, RoomBooking, Assignment, NotificationItem, SecurityAuditLog } from '../types';
 import {
   INITIAL_USER,
   INITIAL_ROOM_BOOKINGS,
@@ -1630,11 +1630,12 @@ export function setLocalCache<T>(key: string, data: T): void {
 
 export interface OfflineQueueItem {
   id?: string;
-  type: 'add_booking' | 'update_booking' | 'delete_booking' | 'add_assignment' | 'update_assignment' | 'save_profile' | 'add_log' | 'add_notification';
+  type: 'add_booking' | 'update_booking' | 'delete_booking' | 'add_assignment' | 'update_assignment' | 'save_profile' | 'add_log' | 'add_notification' | 'add_audit_log';
   payload: any;
   timestamp: number;
   description?: string;
 }
+
 
 // Get count and items of pending offline actions
 export function getPendingOfflineQueue(): OfflineQueueItem[] {
@@ -1648,7 +1649,7 @@ export function getPendingOfflineQueueCount(): number {
 
 // Queue offline mutations to sync when back online
 export function queueOfflineAction(action: {
-  type: 'add_booking' | 'update_booking' | 'delete_booking' | 'add_assignment' | 'update_assignment' | 'save_profile' | 'add_log' | 'add_notification';
+  type: 'add_booking' | 'update_booking' | 'delete_booking' | 'add_assignment' | 'update_assignment' | 'save_profile' | 'add_log' | 'add_notification' | 'add_audit_log';
   payload: any;
   description?: string;
 }): void {
@@ -1686,6 +1687,8 @@ function getActionDescription(type: string, payload: any): string {
       return `บันทึก Log: ${payload?.title || ''}`;
     case 'add_notification':
       return `ส่งการแจ้งเตือน: ${payload?.title || ''}`;
+    case 'add_audit_log':
+      return `Security Audit: ${payload?.details || ''}`;
     default:
       return 'รายการรอซิงค์';
   }
@@ -1722,6 +1725,110 @@ export async function addSystemLogInFirestore(log: {
   }
 }
 
+
+export async function addSecurityAuditLog(log: Omit<SecurityAuditLog, 'id' | 'timestamp' | 'timeIso'> & { id?: string; timestamp?: number; timeIso?: string }): Promise<void> {
+  const auditId = log.id || `audit_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const path = `audit_logs/${auditId}`;
+  const completeAuditLog: SecurityAuditLog = {
+    id: auditId,
+    actionType: log.actionType,
+    severity: log.severity || 'low',
+    actorId: log.actorId,
+    actorName: log.actorName,
+    actorRole: log.actorRole,
+    targetId: log.targetId,
+    targetName: log.targetName,
+    details: log.details,
+    ipAddress: log.ipAddress || '192.168.1.' + Math.floor(10 + Math.random() * 200),
+    userAgent: log.userAgent || (typeof navigator !== 'undefined' ? navigator.userAgent : 'SchoolNexus Client'),
+    timestamp: log.timestamp || Date.now(),
+    timeIso: log.timeIso || new Date().toISOString(),
+  };
+
+  // Cache locally
+  try {
+    const cachedLogs = getLocalCache<SecurityAuditLog[]>('nexus_audit_logs', []);
+    setLocalCache('nexus_audit_logs', [completeAuditLog, ...cachedLogs.slice(0, 199)]);
+    window.dispatchEvent(new CustomEvent('sn_audit_log_added', { detail: completeAuditLog }));
+  } catch (err) {
+    console.warn('[Audit Log Cache Error]', err);
+  }
+
+  try {
+    const docRef = doc(db, 'audit_logs', auditId);
+    await setDoc(docRef, cleanFirestoreData(completeAuditLog));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+    queueOfflineAction({
+      type: 'add_audit_log',
+      payload: completeAuditLog,
+      description: `Security Audit: [${log.actionType}] ${log.details}`,
+    });
+  }
+}
+
+export function subscribeToSecurityAuditLogs(callback: (logs: SecurityAuditLog[]) => void): () => void {
+  const cached = getLocalCache<SecurityAuditLog[]>('nexus_audit_logs', []);
+  if (cached.length > 0) {
+    callback(cached);
+  }
+
+  try {
+    const q = query(collection(db, 'audit_logs'), limit(100));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const logs: SecurityAuditLog[] = [];
+          snapshot.forEach((doc) => {
+            logs.push({ id: doc.id, ...(doc.data() as any) });
+          });
+          logs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setLocalCache('nexus_audit_logs', logs);
+          callback(logs);
+        } else if (cached.length === 0) {
+          // Seed default mock audit logs if empty
+          const seedAudits: SecurityAuditLog[] = [
+            {
+              id: 'audit_init_1',
+              actionType: 'role_switch',
+              severity: 'medium',
+              actorId: 'ADM-001',
+              actorName: 'อาจารย์ วรวุฒิ เพ็ชรไรย์',
+              actorRole: 'admin',
+              targetId: 'ADM-001',
+              targetName: 'Super Administrator',
+              details: 'สลับเข้าสู่โหมดควบคุมระดับสูง (SuperAdmin Root Access)',
+              timestamp: Date.now() - 3600000 * 2,
+              timeIso: new Date(Date.now() - 3600000 * 2).toISOString(),
+            },
+            {
+              id: 'audit_init_2',
+              actionType: 'facility_booking',
+              severity: 'low',
+              actorId: 'TCH-101',
+              actorName: 'อ.สมศักดิ์ นวัตกรรม',
+              actorRole: 'teacher',
+              targetId: 'room_sci_lab',
+              targetName: 'ห้องปฏิบัติการวิทยาศาสตร์',
+              details: 'จองห้องปฏิบัติการวิทย์เพื่อใช้สำหรับการสอบคัดเลือกโอลิมปิก',
+              timestamp: Date.now() - 3600000 * 5,
+              timeIso: new Date(Date.now() - 3600000 * 5).toISOString(),
+            }
+          ];
+          callback(seedAudits);
+        }
+      },
+      (err) => {
+        console.warn('[Audit Logs Snapshot Warning]:', err);
+      }
+    );
+  } catch {
+    return () => {};
+  }
+}
+
+
 export async function syncOfflineQueueToFirestore(): Promise<{
   syncedCount: number;
   failedCount: number;
@@ -1752,6 +1859,8 @@ export async function syncOfflineQueueToFirestore(): Promise<{
         await addSystemLogInFirestore(item.payload);
       } else if (item.type === 'add_notification') {
         await addNotificationToFirestore(item.payload);
+      } else if (item.type === 'add_audit_log') {
+        await addSecurityAuditLog(item.payload);
       }
       syncedCount++;
     } catch (err) {
