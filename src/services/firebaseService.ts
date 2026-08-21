@@ -966,7 +966,7 @@ export async function signInUser(
   }
 }
 
-// Google Sign-In with Popup - Ultra-fast verification
+// Google Sign-In with Popup - Ultra-fast verification with forced Account Chooser
 export async function signInWithGoogle(): Promise<{
   success: boolean;
   user?: UserProfile;
@@ -977,6 +977,11 @@ export async function signInWithGoogle(): Promise<{
   googlePhoto?: string;
 }> {
   try {
+    // Explicitly enforce Google account selector prompt every time
+    googleProvider.setCustomParameters({
+      prompt: 'select_account',
+    });
+
     const result = await signInWithPopup(auth, googleProvider);
     const gUser = result.user;
     if (!gUser || !gUser.email) {
@@ -1033,21 +1038,19 @@ export async function signInWithGoogle(): Promise<{
   } catch (error: any) {
     console.error('Google Sign In error:', error);
     if (error?.code === 'auth/popup-closed-by-user') {
-      return { success: false, error: 'หน้าต่างเข้าสู่ระบบ Google ถูกปิดก่อนดำเนินการเสร็จสิ้น' };
+      return { success: false, error: 'หน้าต่างเลือกบัญชี Google ถูกปิดก่อนทำรายการ' };
+    }
+
+    if (error?.code === 'auth/popup-blocked') {
+      return { success: false, error: 'เบราว์เซอร์บล็อกหน้าต่างป๊อปอัป กรุณาอนุญาตป๊อปอัป (Allow Popups) สำหรับเว็บไซต์นี้' };
     }
     
-    // Handle unauthorized-domain on preview or mobile environments
+    // Handle unauthorized-domain on preview, GitHub Pages, or mobile environments
     if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
-      const localAccounts = getStoredAccounts();
-      if (localAccounts.length > 0) {
-        return { success: true, user: localAccounts[0].user };
-      }
+      const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'vorawut0.github.io';
       return {
         success: false,
-        notRegistered: true,
-        googleEmail: 'vorawutphetrai17@gmail.com',
-        googleName: 'VORAWUT PETCHRAYA',
-        error: 'โดเมนนี้ยังไม่ได้รับการอนุญาตใน Firebase หรือยังไม่มีบัญชีที่ลงทะเบียน กรุณาลงทะเบียนบัญชีใหม่',
+        error: `โดเมน "${currentHost}" ยังไม่ได้รับการเพิ่มใน Authorized Domains ของ Firebase Authentication กรุณาเพิ่มโดเมน "${currentHost}" ใน Firebase Console (Authentication > Settings > Authorized domains)`,
       };
     }
 
