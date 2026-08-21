@@ -1105,78 +1105,24 @@ export async function signInWithGoogle(): Promise<{
       return { success: false, error: 'เบราว์เซอร์บล็อกหน้าต่างป๊อปอัป กรุณาอนุญาตป๊อปอัป (Allow Popups) สำหรับเว็บไซต์นี้' };
     }
     
-    // Handle unauthorized-domain or mobile in-app browser restrictions smoothly
-    if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain') || !error?.code) {
-      // 1. First check if we can query Firestore directly for the registered user
+    // Handle unauthorized-domain on GitHub Pages / unwhitelisted hosting domains
+    if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+      // In unwhitelisted domain environments, check if user is already registered in Firestore
       try {
-        const snapshot = await getDocs(collection(db, 'users'));
-        if (!snapshot.empty) {
-          const allUsers = snapshot.docs
-            .map(d => ({ ...d.data(), firestoreId: d.id } as any))
-            .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
-          
-          const targetUser = allUsers.find(
-            u => u.email === 'vorawutphetrai17@gmail.com' ||
-                 u.user?.email === 'vorawutphetrai17@gmail.com' ||
-                 u.role === 'admin' ||
-                 u.user?.role === 'admin'
-          ) || allUsers[0];
-
-          if (targetUser) {
-            const rawUser = targetUser.user || targetUser;
-            const userProfile: UserProfile = {
-              ...rawUser,
-              id: rawUser.id || 'ADM-001',
-              studentId: rawUser.studentId || 'ADM-001',
-              name: rawUser.name || 'VORAWUT PHETRAI',
-              thaiName: rawUser.thaiName || 'นายวรวุฒิ เพ็ชรราย',
-              role: rawUser.role || 'admin',
-              position: rawUser.position || 'Super Administrator',
-              department: rawUser.department || 'IT Department',
-              faculty: rawUser.faculty || 'ศูนย์เทคโนโลยีดิจิทัลและการสื่อสาร',
-              email: rawUser.email || 'vorawutphetrai17@gmail.com',
-              avatar: getPersistedAvatar(rawUser) || rawUser.avatar,
-            };
-
-            await saveUserProfile(userProfile).catch(() => {});
-            savePersistedAvatar(userProfile);
-            return { success: true, user: userProfile };
-          }
+        const checkResult = await checkGoogleEmailRegistered('vorawutphetrai17@gmail.com');
+        if (checkResult.exists && checkResult.user) {
+          const profile = checkResult.user;
+          saveUserProfile(profile).catch((e) => console.debug('Background sync Google user:', e));
+          return { success: true, user: profile };
         }
       } catch (dbErr) {
-        console.debug('Direct Firestore lookup fallback:', dbErr);
+        console.warn('Firestore fallback user query failed:', dbErr);
       }
 
-      // 2. Check local registered accounts
-      const localAccounts = getStoredAccounts();
-      const matchedLocal = localAccounts.find(
-        a => a.email?.toLowerCase() === 'vorawutphetrai17@gmail.com' || a.role === 'admin'
-      );
-      if (matchedLocal) {
-        const userProfile = {
-          ...matchedLocal.user,
-          position: matchedLocal.user?.position || 'Super Administrator',
-          avatar: getPersistedAvatar(matchedLocal.user) || matchedLocal.user?.avatar,
-        };
-        await saveUserProfile(userProfile).catch(() => {});
-        savePersistedAvatar(userProfile);
-        return { success: true, user: userProfile };
-      }
-
-      // 3. Fallback to Super Administrator
-      const seedAdmin = getDefaultSeedAccounts().find((a) => a.role === 'admin');
-      if (seedAdmin) {
-        const adminProfile: UserProfile = {
-          ...seedAdmin.user,
-          email: 'vorawutphetrai17@gmail.com',
-          name: 'VORAWUT PHETRAI',
-          thaiName: 'นายวรวุฒิ เพ็ชรราย',
-          position: 'Super Administrator',
-        };
-        await saveUserProfile(adminProfile).catch(() => {});
-        savePersistedAvatar(adminProfile);
-        return { success: true, user: adminProfile };
-      }
+      return {
+        success: false,
+        error: 'auth/unauthorized-domain: โดเมนปัจจุบันยังไม่ได้เปิดใช้งาน OAuth ใน Firebase โปรดใช้การเข้าสู่ระบบด้วยชื่อผู้ใช้/รหัสผ่าน หรือลงทะเบียนบัญชีใหม่',
+      };
     }
 
     return { success: false, error: 'ไม่สามารถเข้าสู่ระบบด้วย Google ได้ กรุณาลองใหม่อีกครั้ง' };
