@@ -966,6 +966,73 @@ export async function signInUser(
   }
 }
 
+// Check if a user's Google email exists in our Firestore 'users' collection
+export async function checkGoogleEmailRegistered(email: string, uid?: string): Promise<{
+  exists: boolean;
+  user?: UserProfile;
+}> {
+  if (!email || !email.trim()) {
+    return { exists: false };
+  }
+
+  const cleanEmail = email.trim();
+  const lowerEmail = cleanEmail.toLowerCase();
+
+  try {
+    // 1. Check by UID if available
+    if (uid) {
+      const profileByUid = await fetchUserProfile(uid);
+      if (profileByUid) {
+        return { exists: true, user: profileByUid };
+      }
+    }
+
+    // 2. Query Firestore 'users' collection by exact email and lowercase email
+    const usersRef = collection(db, 'users');
+    const [qSnapExact, qSnapLower] = await Promise.all([
+      getDocs(query(usersRef, where('email', '==', cleanEmail))),
+      getDocs(query(usersRef, where('email', '==', lowerEmail))),
+    ]);
+
+    if (!qSnapExact.empty) {
+      const docData = qSnapExact.docs[0].data() as any;
+      const userProfile = (docData.user || docData) as UserProfile;
+      return { exists: true, user: userProfile };
+    }
+
+    if (!qSnapLower.empty) {
+      const docData = qSnapLower.docs[0].data() as any;
+      const userProfile = (docData.user || docData) as UserProfile;
+      return { exists: true, user: userProfile };
+    }
+
+    // 3. Fallback scan matching email field inside Firestore documents
+    const allSnapshot = await getDocs(usersRef);
+    const matchedDoc = allSnapshot.docs.find((d) => {
+      const data = d.data() as any;
+      const uEmail = data.email || data.user?.email;
+      return uEmail && uEmail.trim().toLowerCase() === lowerEmail;
+    });
+
+    if (matchedDoc) {
+      const docData = matchedDoc.data() as any;
+      const userProfile = (docData.user || docData) as UserProfile;
+      return { exists: true, user: userProfile };
+    }
+
+    return { exists: false };
+  } catch (err) {
+    console.warn('Error checking Google email in Firestore:', err);
+    // Fallback to locally cached registered accounts
+    const localAccounts = getStoredAccounts();
+    const matchedLocal = localAccounts.find((a) => a.email?.trim().toLowerCase() === lowerEmail);
+    if (matchedLocal) {
+      return { exists: true, user: matchedLocal.user };
+    }
+    return { exists: false };
+  }
+}
+
 // Google Sign-In with Popup - Ultra-fast verification with forced Account Chooser
 export async function signInWithGoogle(): Promise<{
   success: boolean;
@@ -989,29 +1056,12 @@ export async function signInWithGoogle(): Promise<{
     }
 
     const gEmail = gUser.email.trim();
-    const lowerEmail = gEmail.toLowerCase();
 
-    // 1. Fast check in local stored accounts (0ms)
-    const localAccounts = getStoredAccounts();
-    const matchingLocal = localAccounts.find((a) => a.email.toLowerCase() === lowerEmail);
-    if (matchingLocal) {
-      saveUserProfile(matchingLocal.user).catch((e) => console.debug('Background sync Google user:', e));
-      return { success: true, user: matchingLocal.user };
-    }
+    // Verify existence in Firestore 'users' collection using helper function
+    const checkResult = await checkGoogleEmailRegistered(gEmail, gUser.uid);
 
-    // 2. Parallel check in Firestore: by UID and by Email
-    const [profileByUid, profileByEmailSnap] = await Promise.all([
-      fetchUserProfile(gUser.uid),
-      getDocs(query(collection(db, 'users'), where('email', '==', gEmail))),
-    ]);
-
-    let profile = profileByUid;
-    if (!profile && !profileByEmailSnap.empty) {
-      profile = profileByEmailSnap.docs[0].data() as UserProfile;
-    }
-
-    // 3. If STILL not registered in Firestore, prompt user to register first
-    if (!profile) {
+    // If NOT registered in Firestore / database, prompt user to register first
+    if (!checkResult.exists || !checkResult.user) {
       return {
         success: false,
         notRegistered: true,
@@ -1021,6 +1071,8 @@ export async function signInWithGoogle(): Promise<{
         error: `อีเมล ${gEmail} ยังไม่ได้ลงทะเบียนในระบบ กรุณาลงทะเบียนบัญชีผู้ใช้ใหม่ด้วยอีเมลนี้ก่อนเข้าสู่ระบบ`,
       };
     }
+
+    const profile = checkResult.user;
 
     // Cache locally for future instant logins
     saveStoredAccount({
@@ -1033,6 +1085,8 @@ export async function signInWithGoogle(): Promise<{
       user: profile,
       registeredAt: new Date().toISOString(),
     });
+
+    saveUserProfile(profile).catch((e) => console.debug('Background sync Google user:', e));
 
     return { success: true, user: profile };
   } catch (error: any) {
