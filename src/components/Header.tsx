@@ -1,6 +1,7 @@
 import React from 'react';
 import { ASSETS } from '../data/mockData';
 import { UserProfile } from '../types';
+import { SyncStatus } from './SyncStatus';
 
 interface HeaderProps {
   currentTab?: string;
@@ -12,6 +13,7 @@ interface HeaderProps {
   onOpenProfile: () => void;
   onOpenAITutor?: () => void;
   onOpenInstallApp?: () => void;
+  onSyncComplete?: (syncedCount: number) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -23,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenProfile,
   onOpenAITutor,
   onOpenInstallApp,
+  onSyncComplete,
 }) => {
   return (
     <header className="sticky top-0 inset-x-0 z-50 w-full bg-white/95 backdrop-blur-xl border-b border-[#e8ecf3] shadow-xs">
@@ -125,6 +128,9 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="hidden md:inline">แอปมือถือ</span>
             </button>
           )}
+
+          {/* Real-time Firestore Sync Status Indicator & Trigger */}
+          <SyncStatus isOffline={isOffline} onSyncComplete={onSyncComplete} />
 
           <button
             onClick={onOpenSearch}

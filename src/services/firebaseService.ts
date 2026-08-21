@@ -1627,26 +1627,111 @@ export function setLocalCache<T>(key: string, data: T): void {
   }
 }
 
+export interface OfflineQueueItem {
+  id?: string;
+  type: 'add_booking' | 'update_booking' | 'delete_booking' | 'add_assignment' | 'update_assignment' | 'save_profile' | 'add_log' | 'add_notification';
+  payload: any;
+  timestamp: number;
+  description?: string;
+}
+
+// Get count and items of pending offline actions
+export function getPendingOfflineQueue(): OfflineQueueItem[] {
+  return getLocalCache<OfflineQueueItem[]>('offline_sync_queue', []);
+}
+
+export function getPendingOfflineQueueCount(): number {
+  const queue = getPendingOfflineQueue();
+  return queue.length;
+}
+
 // Queue offline mutations to sync when back online
 export function queueOfflineAction(action: {
-  type: 'add_booking' | 'update_booking' | 'delete_booking' | 'add_assignment' | 'update_assignment' | 'save_profile';
+  type: 'add_booking' | 'update_booking' | 'delete_booking' | 'add_assignment' | 'update_assignment' | 'save_profile' | 'add_log' | 'add_notification';
   payload: any;
+  description?: string;
 }): void {
   try {
-    const queue = getLocalCache<any[]>('offline_sync_queue', []);
-    queue.push({ ...action, timestamp: Date.now() });
+    const queue = getLocalCache<OfflineQueueItem[]>('offline_sync_queue', []);
+    const item: OfflineQueueItem = {
+      id: `queue_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      ...action,
+      timestamp: Date.now(),
+      description: action.description || getActionDescription(action.type, action.payload),
+    };
+    queue.push(item);
     setLocalCache('offline_sync_queue', queue);
+    window.dispatchEvent(new CustomEvent('sn_offline_queue_changed', { detail: { count: queue.length } }));
   } catch (err) {
     console.warn('[Offline Queue] Failed to queue action:', err);
   }
 }
 
-export async function syncOfflineQueueToFirestore(): Promise<number> {
-  const queue = getLocalCache<any[]>('offline_sync_queue', []);
-  if (!queue.length) return 0;
+function getActionDescription(type: string, payload: any): string {
+  switch (type) {
+    case 'add_assignment':
+      return `เพิ่มการบ้าน: ${payload?.title || 'รายการใหม่'}`;
+    case 'update_assignment':
+      return `อัปเดตการบ้าน ID: ${payload?.id || ''}`;
+    case 'add_booking':
+      return `จองห้อง: ${payload?.roomName || ''}`;
+    case 'update_booking':
+      return `แก้ไขการจองห้อง ID: ${payload?.id || ''}`;
+    case 'delete_booking':
+      return `ยกเลิกการจอง ID: ${payload || ''}`;
+    case 'save_profile':
+      return `บันทึกโปรไฟล์: ${payload?.name || ''}`;
+    case 'add_log':
+      return `บันทึก Log: ${payload?.title || ''}`;
+    case 'add_notification':
+      return `ส่งการแจ้งเตือน: ${payload?.title || ''}`;
+    default:
+      return 'รายการรอซิงค์';
+  }
+}
+
+export async function addSystemLogInFirestore(log: {
+  id?: string;
+  title: string;
+  description: string;
+  category: 'security' | 'iot' | 'access' | 'system';
+  level: 'info' | 'warning' | 'alert';
+  deviceOrGate?: string;
+  time?: string;
+}): Promise<void> {
+  const logId = log.id || `log-${Date.now()}`;
+  const path = `system_logs/${logId}`;
+  const completeLog = {
+    ...log,
+    id: logId,
+    timestamp: Date.now(),
+    time: log.time || new Date().toLocaleString('th-TH'),
+  };
+
+  try {
+    const docRef = doc(db, 'system_logs', logId);
+    await setDoc(docRef, cleanFirestoreData(completeLog));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+    queueOfflineAction({
+      type: 'add_log',
+      payload: completeLog,
+      description: `Log ระบบ: ${log.title}`,
+    });
+  }
+}
+
+export async function syncOfflineQueueToFirestore(): Promise<{
+  syncedCount: number;
+  failedCount: number;
+  totalRemaining: number;
+}> {
+  const queue = getLocalCache<OfflineQueueItem[]>('offline_sync_queue', []);
+  if (!queue.length) return { syncedCount: 0, failedCount: 0, totalRemaining: 0 };
 
   let syncedCount = 0;
-  const remaining: any[] = [];
+  let failedCount = 0;
+  const remaining: OfflineQueueItem[] = [];
 
   for (const item of queue) {
     try {
@@ -1662,16 +1747,27 @@ export async function syncOfflineQueueToFirestore(): Promise<number> {
         await updateAssignmentInFirestore(item.payload.id, item.payload.updates);
       } else if (item.type === 'save_profile') {
         await saveUserProfile(item.payload);
+      } else if (item.type === 'add_log') {
+        await addSystemLogInFirestore(item.payload);
+      } else if (item.type === 'add_notification') {
+        await addNotificationToFirestore(item.payload);
       }
       syncedCount++;
     } catch (err) {
       console.warn('[Offline Sync] Item sync deferred:', err);
+      failedCount++;
       remaining.push(item);
     }
   }
 
   setLocalCache('offline_sync_queue', remaining);
-  return syncedCount;
+  window.dispatchEvent(new CustomEvent('sn_offline_queue_changed', { detail: { count: remaining.length } }));
+
+  return {
+    syncedCount,
+    failedCount,
+    totalRemaining: remaining.length,
+  };
 }
 
 // Initial Data Seeders

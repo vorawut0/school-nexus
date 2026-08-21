@@ -153,9 +153,9 @@ export default function App() {
     const handleOnline = async () => {
       setIsOffline(false);
       setOfflineToast('เชื่อมต่อเครือข่ายสำเร็จ กำลังซิงค์ข้อมูล...');
-      const syncedCount = await syncOfflineQueueToFirestore();
-      if (syncedCount > 0) {
-        setOfflineToast(`ซิงค์ข้อมูลที่บันทึกไว้ขณะออฟไลน์ (${syncedCount} รายการ) สำเร็จแล้ว`);
+      const res = await syncOfflineQueueToFirestore();
+      if (res.syncedCount > 0) {
+        setOfflineToast(`ซิงค์ข้อมูลที่บันทึกไว้ขณะออฟไลน์ (${res.syncedCount} รายการ) สำเร็จแล้ว`);
       } else {
         setOfflineToast('กลับมาออนไลน์แล้ว ข้อมูลเป็นปัจจุบัน');
       }
@@ -723,6 +723,10 @@ export default function App() {
         onOpenProfile={() => setCurrentTab('profile')}
         onOpenAITutor={() => handleOpenAITutor(null)}
         onOpenInstallApp={() => setShowMobileInstallModal(true)}
+        onSyncComplete={(count) => {
+          setOfflineToast(`ซิงค์ข้อมูล ${count} รายการไปยัง Firestore สำเร็จแล้ว`);
+          setTimeout(() => setOfflineToast(null), 4000);
+        }}
       />
 
       {/* Offline Status Warning Bar */}
