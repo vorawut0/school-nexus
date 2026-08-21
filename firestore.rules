@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // System connection test document
+    match /system/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // User Profiles
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(userId);
+    }
+
+    // Room Bookings & Smart Passes
+    match /roomBookings/{bookingId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(bookingId);
+    }
+
+    // Assignments
+    match /assignments/{assignmentId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(assignmentId);
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(notificationId);
+    }
+  }
+}

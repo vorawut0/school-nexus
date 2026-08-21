@@ -1,0 +1,174 @@
+import React from 'react';
+import { ASSETS } from '../data/mockData';
+import { UserProfile } from '../types';
+
+interface HeaderProps {
+  currentTab?: string;
+  user: UserProfile;
+  unreadNotificationsCount: number;
+  isOffline?: boolean;
+  onOpenSearch: () => void;
+  onOpenNotifications: () => void;
+  onOpenProfile: () => void;
+  onOpenAITutor?: () => void;
+  onOpenInstallApp?: () => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({
+  user,
+  unreadNotificationsCount,
+  isOffline = !navigator.onLine,
+  onOpenSearch,
+  onOpenNotifications,
+  onOpenProfile,
+  onOpenAITutor,
+  onOpenInstallApp,
+}) => {
+  return (
+    <header className="sticky top-0 inset-x-0 z-50 w-full bg-white/95 backdrop-blur-xl border-b border-[#e8ecf3] shadow-xs">
+      <div className="w-full max-w-[1280px] mx-auto h-16 flex items-center justify-between px-4 sm:px-6">
+        {/* Logo and App Title */}
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center bg-white shadow-xs border border-slate-100/80 shrink-0">
+            <img
+              src={ASSETS.logo}
+              alt="School Nexus Logo"
+              referrerPolicy="no-referrer"
+              className="h-full w-full object-contain"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (target.src !== ASSETS.fallbackLogo) {
+                  target.src = ASSETS.fallbackLogo;
+                }
+              }}
+            />
+          </div>
+          <span className="font-bold text-[17px] sm:text-[19px] text-[#121b2e] tracking-tight flex items-center gap-2">
+            <span>School Nexus</span>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                user.role === 'admin'
+                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                  : user.role === 'parent'
+                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                  : user.role === 'teacher'
+                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                  : 'bg-emerald-50 text-[#00694d] border-emerald-200'
+              }`}
+            >
+              {user.role === 'admin'
+                ? 'ผู้ดูแลระบบ'
+                : user.role === 'parent'
+                ? 'ผู้ปกครอง'
+                : user.role === 'teacher'
+                ? 'อาจารย์'
+                : 'นักเรียน'}
+            </span>
+          </span>
+        </div>
+
+        {/* Action Controls */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* AI Assistant Quick Access Button per Role */}
+          {onOpenAITutor && (
+            <button
+              onClick={onOpenAITutor}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl border flex items-center gap-1.5 text-[12px] sm:text-[13px] font-bold active:scale-95 transition-all shadow-2xs group cursor-pointer ${
+                user.role === 'teacher'
+                  ? 'bg-blue-50/80 hover:bg-blue-100/80 text-blue-700 border-blue-200/80'
+                  : user.role === 'admin'
+                  ? 'bg-purple-50/80 hover:bg-purple-100/80 text-purple-700 border-purple-200/80'
+                  : user.role === 'parent'
+                  ? 'bg-amber-50/80 hover:bg-amber-100/80 text-amber-700 border-amber-200/80'
+                  : 'bg-gradient-to-r from-[#1550d3]/10 to-[#7857f8]/10 hover:from-[#1550d3]/20 hover:to-[#7857f8]/20 text-[#1550d3] border-[#1550d3]/20'
+              }`}
+              title={
+                user.role === 'teacher'
+                  ? 'เปิด AI Teaching Assistant (ผู้ช่วยการสอน)'
+                  : user.role === 'admin'
+                  ? 'เปิด AI Ops Assistant (ผู้ช่วยระบบ)'
+                  : user.role === 'parent'
+                  ? 'เปิด AI Family Guide (ที่ปรึกษาครอบครัว)'
+                  : 'เปิด AI Tutor (ผู้ช่วยติวเตอร์)'
+              }
+              aria-label="AI Assistant"
+            >
+              <span className="material-symbols-outlined text-[17px] sm:text-[18px] group-hover:scale-110 transition-transform">
+                {user.role === 'teacher'
+                  ? 'menu_book'
+                  : user.role === 'admin'
+                  ? 'security'
+                  : user.role === 'parent'
+                  ? 'family_restroom'
+                  : 'auto_awesome'}
+              </span>
+              <span className="hidden sm:inline">
+                {user.role === 'teacher'
+                  ? 'ผู้ช่วยสอน AI'
+                  : user.role === 'admin'
+                  ? 'ดูแลระบบ AI'
+                  : user.role === 'parent'
+                  ? 'ดูแลครอบครัว AI'
+                  : 'ติวเตอร์ AI'}
+              </span>
+            </button>
+          )}
+
+          {onOpenInstallApp && (
+            <button
+              onClick={onOpenInstallApp}
+              className="px-2 sm:px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-800 flex items-center gap-1.5 text-[12px] font-bold active:scale-95 transition-all shadow-2xs cursor-pointer"
+              title="ติดตั้งแอปพลิเคชันบนมือถือ (Android & iOS)"
+              aria-label="Install Mobile App"
+            >
+              <span className="material-symbols-outlined text-[17px] text-emerald-600">install_mobile</span>
+              <span className="hidden md:inline">แอปมือถือ</span>
+            </button>
+          )}
+
+          <button
+            onClick={onOpenSearch}
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-[#434654] hover:text-[#1550d3] hover:bg-[#1550d3]/5 active:scale-95 transition-all"
+            title="ค้นหา"
+            aria-label="Search"
+          >
+            <span className="material-symbols-outlined text-[22px]">search</span>
+          </button>
+
+          <button
+            onClick={onOpenNotifications}
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-[#434654] hover:text-[#1550d3] hover:bg-[#1550d3]/5 active:scale-95 transition-all relative"
+            title="การแจ้งเตือน"
+            aria-label="Notifications"
+          >
+            <span className="material-symbols-outlined text-[22px]">notifications</span>
+            {unreadNotificationsCount > 0 && (
+              <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-[#ba1a1a] rounded-full ring-2 ring-white animate-pulse" />
+            )}
+          </button>
+
+          <button
+            onClick={onOpenProfile}
+            className="relative ml-1 active:scale-95 transition-transform group"
+            title={isOffline ? "สถานะ: ออฟไลน์ (Offline)" : "สถานะ: ออนไลน์ (Online)"}
+            aria-label="Profile"
+          >
+            <img
+              src={user.avatar || ASSETS.headerAvatar}
+              alt={user.name}
+              className="w-9 h-9 rounded-full object-cover ring-2 ring-[#dce1ff] shadow-sm hover:ring-[#1550d3] transition-all"
+            />
+            {/* Online (Green) / Offline (Red) Status Indicator */}
+            <span
+              className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white transition-colors duration-300 ${
+                isOffline
+                  ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.7)]'
+                  : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]'
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+};

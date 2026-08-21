@@ -1,0 +1,214 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-primary: #1550d3;
+    --color-primary-container: #3c6bed;
+    --color-primary-fixed: #dce1ff;
+    --color-primary-fixed-dim: #b5c4ff;
+    --color-secondary: #5f3add;
+    --color-secondary-container: #7857f8;
+    --color-secondary-fixed: #e6deff;
+    --color-secondary-fixed-dim: #cabeff;
+    --color-tertiary: #00694d;
+    --color-tertiary-container: #008562;
+    --color-tertiary-fixed: #67fcc6;
+    --color-tertiary-fixed-dim: #44dfab;
+    --color-surface: #f9f9ff;
+    --color-surface-container-lowest: #ffffff;
+    --color-surface-container-low: #f1f3ff;
+    --color-surface-container: #e9edff;
+    --color-surface-container-high: #e1e8ff;
+    --color-surface-container-highest: #d9e2fc;
+    --color-surface-variant: #d9e2fc;
+    --color-on-surface: #121b2e;
+    --color-on-surface-variant: #434654;
+    --color-inverse-surface: #273044;
+    --color-inverse-on-surface: #edf0ff;
+    --color-outline: #737686;
+    --color-outline-variant: #c3c5d7;
+    --color-error: #ba1a1a;
+    --color-error-container: #ffdad6;
+  }
+
+  html.dark, :root.dark {
+    --color-surface: #0b1120;
+    --color-surface-container-lowest: #070d19;
+    --color-surface-container-low: #0f172a;
+    --color-surface-container: #1e293b;
+    --color-surface-container-high: #334155;
+    --color-surface-container-highest: #475569;
+    --color-surface-variant: #1e293b;
+    --color-on-surface: #f8fafc;
+    --color-on-surface-variant: #94a3b8;
+    --color-inverse-surface: #f1f5f9;
+    --color-inverse-on-surface: #0b1120;
+    --color-outline: #64748b;
+    --color-outline-variant: #334155;
+  }
+
+  body {
+    font-family: 'Noto Sans Thai', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--color-surface);
+    color: var(--color-on-surface);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+}
+
+/* Dark Mode Comprehensive Overrides */
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  background-color: #0b1120;
+  color: #f1f5f9;
+}
+
+html.dark .bg-\[\#f9f9ff\],
+html.dark .bg-slate-50,
+html.dark .bg-slate-100 {
+  background-color: #0f172a;
+}
+
+html.dark .bg-white {
+  background-color: #1e293b;
+  color: #f1f5f9;
+}
+
+html.dark .bg-slate-50\/80,
+html.dark .bg-slate-50\/70,
+html.dark .bg-slate-50\/50 {
+  background-color: rgba(15, 23, 42, 0.7);
+}
+
+html.dark .text-\[\#121b2e\],
+html.dark .text-slate-900,
+html.dark .text-slate-800 {
+  color: #f8fafc;
+}
+
+html.dark .text-\[\#434654\],
+html.dark .text-\[\#737686\],
+html.dark .text-slate-600,
+html.dark .text-slate-500 {
+  color: #94a3b8;
+}
+
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-200\/80,
+html.dark .border-slate-200\/90,
+html.dark .border-slate-300 {
+  border-color: #334155;
+}
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #334155;
+}
+
+html.dark .glass-header {
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-color: rgba(51, 65, 85, 0.7);
+}
+
+html.dark .glass-card {
+  background: rgba(30, 41, 59, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-color: rgba(51, 65, 85, 0.7);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(115, 118, 134, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(115, 118, 134, 0.4);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
+}
+
+.glass-header {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+.material-symbols-outlined.fill-1 {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* 3D Card Flip & Perspective Utilities */
+.perspective-1000 {
+  perspective: 1000px;
+  -webkit-perspective: 1000px;
+}
+
+.transform-style-3d {
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+  -webkit-transform: rotateY(180deg);
+}
+
+.rotate-y-0 {
+  transform: rotateY(0deg);
+  -webkit-transform: rotateY(0deg);
+}
+
+.card-flip-smooth {
+  transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+  will-change: transform;
+}
+

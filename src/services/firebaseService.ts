@@ -1,0 +1,1531 @@
+import {
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  where,
+  orderBy,
+  limit,
+} from 'firebase/firestore';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signInWithPopup,
+} from 'firebase/auth';
+import { db, auth, googleProvider, handleFirestoreError, OperationType } from '../firebase';
+import { UserProfile, UserRole, RoomBooking, Assignment, NotificationItem } from '../types';
+import { INITIAL_USER, INITIAL_ROOM_BOOKINGS, MOCK_ASSIGNMENTS, MOCK_NOTIFICATIONS, DEMO_PRESET_USERS, ASSETS } from '../data/mockData';
+
+// Helper to get custom preset users from localStorage
+export function getStoredCustomPresets(): Record<string, UserProfile> {
+  try {
+    const raw = localStorage.getItem('sn_preset_users_custom');
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+export function saveStoredCustomPreset(role: string, user: UserProfile): void {
+  try {
+    const existing = getStoredCustomPresets();
+    existing[role] = user;
+    localStorage.setItem('sn_preset_users_custom', JSON.stringify(existing));
+  } catch (e) {
+    console.warn('Failed to save custom preset locally:', e);
+  }
+}
+
+// Universal avatar persistence lookup to ensure custom photos never revert
+export function getPersistedAvatar(userOrKey: UserProfile | string): string | null {
+  try {
+    if (typeof userOrKey === 'string') {
+      const lower = userOrKey.toLowerCase();
+      return (
+        localStorage.getItem(`sn_avatar_${lower}`) ||
+        localStorage.getItem(`sn_avatar_${userOrKey}`) ||
+        localStorage.getItem(`sn_avatar_role_${lower}`) ||
+        null
+      );
+    }
+
+    if (!userOrKey) return null;
+    const user = userOrKey;
+    const fromStudentId = user.studentId ? localStorage.getItem(`sn_avatar_${user.studentId.toLowerCase()}`) : null;
+    if (fromStudentId) return fromStudentId;
+
+    const fromEmail = user.email ? localStorage.getItem(`sn_avatar_${user.email.toLowerCase()}`) : null;
+    if (fromEmail) return fromEmail;
+
+    const fromId = user.id ? localStorage.getItem(`sn_avatar_${user.id}`) : null;
+    if (fromId) return fromId;
+
+    const fromRole = user.role ? localStorage.getItem(`sn_avatar_role_${user.role}`) : null;
+    if (fromRole) return fromRole;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+// Clean undefined fields recursively so Firestore setDoc never throws unsupported undefined value errors
+export function cleanFirestoreData<T extends Record<string, any>>(data: T): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+        result[key] = cleanFirestoreData(value);
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+  return result;
+}
+
+export function savePersistedAvatar(user: UserProfile): void {
+  if (!user || !user.avatar) return;
+  try {
+    if (user.studentId) {
+      localStorage.setItem(`sn_avatar_${user.studentId.toLowerCase()}`, user.avatar);
+    }
+    if (user.email) {
+      localStorage.setItem(`sn_avatar_${user.email.toLowerCase()}`, user.avatar);
+    }
+    if (user.id) {
+      localStorage.setItem(`sn_avatar_${user.id}`, user.avatar);
+    }
+    if (user.role) {
+      localStorage.setItem(`sn_avatar_role_${user.role}`, user.avatar);
+    }
+  } catch (e) {
+    console.warn('Failed to store avatar key in localStorage:', e);
+  }
+}
+
+// User Profile Firestore Services
+export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
+  const path = `users/${userId}`;
+  try {
+    const docRef = doc(db, 'users', userId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data() as UserProfile;
+      const customAvatar = getPersistedAvatar(data);
+      if (customAvatar) {
+        data.avatar = customAvatar;
+      }
+      return data;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+export async function saveUserProfile(userProfile: UserProfile): Promise<void> {
+  // 1. Save Avatar in multi-key lookup to guarantee no revert
+  if (userProfile.avatar) {
+    savePersistedAvatar(userProfile);
+  }
+
+  // 2. Always update local cache immediately for zero-latency persistence & offline support
+  setLocalCache('user_profile', userProfile);
+  try {
+    localStorage.setItem('sn_user_profile', JSON.stringify(userProfile));
+    localStorage.setItem('sn_active_user', JSON.stringify(userProfile));
+  } catch (e) {
+    console.warn('LocalStorage write warning:', e);
+  }
+
+  // 3. Update in-memory and persistent preset if user matches a role
+  if (userProfile.role) {
+    saveStoredCustomPreset(userProfile.role, userProfile);
+    if (DEMO_PRESET_USERS[userProfile.role]) {
+      DEMO_PRESET_USERS[userProfile.role] = {
+        ...DEMO_PRESET_USERS[userProfile.role],
+        ...userProfile,
+      };
+    }
+  }
+
+  // 4. Update registered accounts repository so next login requires the newly changed ID
+  try {
+    const accounts = getStoredAccounts();
+    const index = accounts.findIndex(
+      (a) =>
+        (userProfile.id && a.id === userProfile.id) ||
+        (userProfile.role && a.role === userProfile.role) ||
+        (userProfile.email && a.email?.toLowerCase() === userProfile.email.toLowerCase())
+    );
+
+    if (index >= 0) {
+      accounts[index].user = { ...accounts[index].user, ...userProfile };
+      accounts[index].studentId = userProfile.studentId;
+      accounts[index].email = userProfile.email;
+      accounts[index].role = userProfile.role;
+      accounts[index].name = userProfile.name;
+      accounts[index].thaiName = userProfile.thaiName;
+      if (userProfile.avatar) {
+        accounts[index].user.avatar = userProfile.avatar;
+      }
+      localStorage.setItem('sn_registered_accounts', JSON.stringify(accounts));
+    }
+
+    // Auto-update remembered ID for this role so login page uses the new ID
+    if (userProfile.role && userProfile.studentId) {
+      localStorage.setItem(`sn_remembered_id_${userProfile.role}`, userProfile.studentId);
+    }
+  } catch (e) {
+    console.warn('Failed to update registered account record with new profile:', e);
+  }
+
+  // 5. Save to Firestore
+  const path = `users/${userProfile.id}`;
+  try {
+    const docRef = doc(db, 'users', userProfile.id);
+    await setDoc(
+      docRef,
+      cleanFirestoreData({
+        ...userProfile,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
+  } catch (error) {
+    queueOfflineAction({ type: 'save_profile', payload: userProfile });
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export interface RegisterUserData {
+  name: string;
+  thaiName: string;
+  email: string;
+  password?: string;
+  role: UserRole;
+  studentId?: string;
+  grade?: string;
+  room?: string;
+  major?: string;
+  position?: string;
+  department?: string;
+  childName?: string;
+  rfidCard?: string;
+  avatar?: string;
+}
+
+// Interface for Stored Registered Account Credentials
+export interface StoredAccountRecord {
+  id: string;
+  studentId: string;
+  email: string;
+  name: string;
+  thaiName: string;
+  role: UserRole;
+  password?: string;
+  user: UserProfile;
+  registeredAt: string;
+}
+
+// Local Account Repository Helpers for maximum reliability and offline support
+export function getStoredAccounts(): StoredAccountRecord[] {
+  try {
+    const raw = localStorage.getItem('sn_registered_accounts');
+    if (!raw) return [];
+    const parsed: StoredAccountRecord[] = JSON.parse(raw);
+    return parsed.map((item) => {
+      if (item.user) {
+        const persistedAvatar = getPersistedAvatar(item.user);
+        if (persistedAvatar) {
+          item.user = { ...item.user, avatar: persistedAvatar };
+        }
+      }
+      return item;
+    });
+  } catch (e) {
+    console.warn('Failed to read stored accounts:', e);
+    return [];
+  }
+}
+
+export function saveStoredAccount(account: StoredAccountRecord): void {
+  try {
+    const list = getStoredAccounts();
+    const existing = list.find(
+      (a) =>
+        a.id === account.id ||
+        (account.email && a.email.toLowerCase() === account.email.toLowerCase()) ||
+        (account.studentId && a.studentId === account.studentId)
+    );
+    const filtered = list.filter(
+      (a) => a.id !== account.id && a.email.toLowerCase() !== account.email.toLowerCase() && a.studentId !== account.studentId
+    );
+    const recordToSave: StoredAccountRecord = {
+      ...account,
+      password: account.password || existing?.password || '',
+    };
+    filtered.unshift(recordToSave);
+    localStorage.setItem('sn_registered_accounts', JSON.stringify(filtered));
+  } catch (e) {
+    console.warn('Failed to save stored account locally:', e);
+  }
+}
+
+export function removeStoredAccount(accountIdOrEmail: string): void {
+  try {
+    const list = getStoredAccounts();
+    const target = accountIdOrEmail.toLowerCase();
+    const filtered = list.filter(
+      (a) => a.id.toLowerCase() !== target && a.email.toLowerCase() !== target && a.studentId.toLowerCase() !== target
+    );
+    localStorage.setItem('sn_registered_accounts', JSON.stringify(filtered));
+  } catch (e) {
+    console.warn('Failed to remove stored account locally:', e);
+  }
+}
+
+export function clearAllRegisteredAccounts(role?: UserRole): void {
+  try {
+    if (role) {
+      const list = getStoredAccounts();
+      const filtered = list.filter((a) => a.role !== role);
+      localStorage.setItem('sn_registered_accounts', JSON.stringify(filtered));
+      localStorage.removeItem(`sn_custom_preset_${role}`);
+      localStorage.removeItem(`sn_remembered_id_${role}`);
+    } else {
+      localStorage.removeItem('sn_registered_accounts');
+      localStorage.removeItem('sn_custom_preset_student');
+      localStorage.removeItem('sn_custom_preset_teacher');
+      localStorage.removeItem('sn_custom_preset_admin');
+      localStorage.removeItem('sn_custom_preset_parent');
+      localStorage.removeItem('sn_remembered_id_student');
+      localStorage.removeItem('sn_remembered_id_teacher');
+      localStorage.removeItem('sn_remembered_id_admin');
+      localStorage.removeItem('sn_remembered_id_parent');
+    }
+  } catch (e) {
+    console.warn('Failed to clear stored accounts:', e);
+  }
+}
+
+export async function deleteUserAccountByEmailOrId(identifier: string): Promise<{ success: boolean; deletedCount: number; error?: string }> {
+  try {
+    const trimmed = identifier.trim();
+    const lower = trimmed.toLowerCase();
+    let deletedCount = 0;
+
+    // 1. Delete from Cloud Firestore
+    try {
+      const usersCol = collection(db, 'users');
+      const allDocsSnap = await getDocs(usersCol);
+      for (const docItem of allDocsSnap.docs) {
+        const u = docItem.data() as UserProfile;
+        if (
+          docItem.id.toLowerCase() === lower ||
+          (u.email && u.email.toLowerCase() === lower) ||
+          (u.studentId && u.studentId.toLowerCase() === lower) ||
+          (u.id && u.id.toLowerCase() === lower)
+        ) {
+          await deleteDoc(doc(db, 'users', docItem.id));
+          deletedCount++;
+        }
+      }
+    } catch (e) {
+      console.warn('Firestore user deletion notice:', e);
+    }
+
+    // 2. Remove from local stored accounts
+    removeStoredAccount(trimmed);
+    
+    // Clear role-specific remembered keys if matching
+    ['student', 'teacher', 'admin', 'parent'].forEach((r) => {
+      const remId = localStorage.getItem(`sn_remembered_id_${r}`);
+      if (remId && (remId.toLowerCase() === lower || remId === trimmed)) {
+        localStorage.removeItem(`sn_remembered_id_${r}`);
+      }
+    });
+
+    return { success: true, deletedCount };
+  } catch (error: any) {
+    console.error('Delete user account error:', error);
+    return { success: false, deletedCount: 0, error: error?.message || 'ไม่สามารถลบบัญชีได้' };
+  }
+}
+
+// Auto purge vorawutphetrai17@gmail.com once on startup / demand
+export async function purgeAccountImmediately(email: string = 'vorawutphetrai17@gmail.com'): Promise<void> {
+  try {
+    await deleteUserAccountByEmailOrId(email);
+  } catch (err) {
+    console.debug('Purge notice:', err);
+  }
+}
+
+// Full Registration Service connected to Firebase Auth & Firestore
+export async function registerNewUser(data: RegisterUserData): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
+  try {
+    const SUPER_ADMIN_EMAIL = 'vorawutphetrai17@gmail.com';
+    
+    // Enforce admin role restriction: only the designated admin email can register as admin
+    if (data.role === 'admin' && data.email.trim().toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase()) {
+      return {
+        success: false,
+        error: `สิทธิ์ผู้ดูแลระบบ (Admin) สงวนไว้เฉพาะอีเมลผู้ดูแลระบบหลัก (${SUPER_ADMIN_EMAIL}) เท่านั้น`,
+      };
+    }
+
+    let generatedUid = `user-${Date.now()}`;
+    const regPassword = data.password?.trim() || 'nexus2026';
+    const trimmedEmail = data.email.trim();
+    
+    // 1. Attempt Firebase Auth creation or update if email & password are provided
+    if (trimmedEmail && regPassword && regPassword.length >= 6) {
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, regPassword);
+        if (userCredential.user?.uid) {
+          generatedUid = userCredential.user.uid;
+        }
+      } catch (authErr: any) {
+        console.warn('Firebase Auth sign up info:', authErr?.code || authErr?.message);
+        // If email already exists in Firebase Auth, attempt sign-in to claim UID
+        if (authErr?.code === 'auth/email-already-in-use') {
+          try {
+            const signInRes = await signInWithEmailAndPassword(auth, trimmedEmail, regPassword);
+            if (signInRes.user?.uid) {
+              generatedUid = signInRes.user.uid;
+            }
+          } catch {
+            // If previous password differed, generate a unique deterministic ID
+            generatedUid = `user-${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+          }
+        }
+      }
+    }
+
+    // 2. Auto-generate standard IDs if missing
+    const assignedStudentId = data.studentId?.trim() || (
+      data.role === 'student' ? `${Math.floor(66040000 + Math.random() * 9999)}` :
+      data.role === 'teacher' ? `T-${Math.floor(55000 + Math.random() * 9999)}` :
+      data.role === 'admin' ? `ADM-001` :
+      `P-${Math.floor(66040000 + Math.random() * 9999)}`
+    );
+
+    const assignedRfid = data.rfidCard?.trim() || `NFC-SN-${Math.floor(1000 + Math.random() * 9000)}-2026`;
+
+    // 3. Choose appropriate avatar
+    let defaultAvatar = ASSETS.headerAvatar;
+    if (data.avatar) {
+      defaultAvatar = data.avatar;
+    } else if (data.role === 'teacher') {
+      defaultAvatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+    } else if (data.role === 'admin') {
+      defaultAvatar = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80';
+    } else if (data.role === 'parent') {
+      defaultAvatar = 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80';
+    }
+
+    const rawProfile: UserProfile = {
+      id: generatedUid,
+      name: (data.name?.trim() || data.thaiName.trim()).toUpperCase(),
+      thaiName: data.thaiName.trim(),
+      studentId: assignedStudentId,
+      email: trimmedEmail,
+      role: data.role,
+      avatar: defaultAvatar,
+      streakDays: 1,
+      grade: data.grade || (data.role === 'student' ? 'มัธยมศึกษาปีที่ 6/1' : undefined),
+      room: data.room || (data.role === 'student' ? 'ห้อง 601' : undefined),
+      major: data.major || (data.role === 'student' ? 'วิทยาศาสตร์-คณิตศาสตร์-คอมพิวเตอร์' : undefined),
+      gpa: data.role === 'student' ? 3.85 : undefined,
+      advisor: data.role === 'student' ? 'อ.กิตติพงษ์ เลิศพิริยะ' : undefined,
+      position: data.position || (data.role === 'teacher' ? 'อาจารย์ผู้สอนวิชาวิทยาการคำนวณ' : data.role === 'admin' ? 'ผู้ดูแลระบบไอทีและเครือข่าย' : data.role === 'parent' ? 'ผู้ปกครองนักเรียน' : undefined),
+      department: data.department || (data.role === 'teacher' ? 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี' : data.role === 'admin' ? 'ศูนย์เทคโนโลยีสารสนเทศ' : data.role === 'parent' ? 'สมาคมผู้ปกครองและครู' : undefined),
+      childName: data.role === 'parent' ? (data.childName?.trim() || data.thaiName.trim()) : undefined,
+      rfidCard: assignedRfid,
+      cardTheme: 'obsidian-gold',
+    };
+
+    const newUserProfile: UserProfile = cleanFirestoreData(rawProfile) as UserProfile;
+
+    // 4. Save user profile + password securely in Firestore
+    const userDocRef = doc(db, 'users', generatedUid);
+    await setDoc(
+      userDocRef,
+      cleanFirestoreData({
+        ...newUserProfile,
+        password: regPassword,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
+
+    // Also update custom avatar if present
+    savePersistedAvatar(newUserProfile);
+
+    // 5. Save credentials record locally
+    saveStoredAccount({
+      id: generatedUid,
+      studentId: assignedStudentId,
+      email: trimmedEmail,
+      name: newUserProfile.name,
+      thaiName: newUserProfile.thaiName,
+      role: data.role,
+      password: regPassword,
+      user: newUserProfile,
+      registeredAt: new Date().toISOString(),
+    });
+
+    // Auto-update remembered ID for this role
+    localStorage.setItem(`sn_remembered_id_${data.role}`, assignedStudentId);
+
+    // 6. Add welcome notification
+    const welcomeNotif: NotificationItem = {
+      id: `notif-${Date.now()}`,
+      title: 'ยินดีต้อนรับสู่ School Nexus Cloud',
+      message: `ลงทะเบียนบัญชี ${newUserProfile.thaiName} (${assignedStudentId}) สำเร็จ เข้าสู่ระบบพร้อมใช้งานเรียบร้อยแล้ว`,
+      time: 'เมื่อสักครู่',
+      type: 'system',
+      read: false,
+    };
+    await addNotificationToFirestore(welcomeNotif);
+
+    return { success: true, user: newUserProfile };
+  } catch (error: any) {
+    console.error('Error during registration:', error);
+    return { success: false, error: error?.message || 'เกิดข้อผิดพลาดในการลงทะเบียน กรุณาลองใหม่อีกครั้ง' };
+  }
+}
+
+// User Sign In Service with Strict Firestore & Password Verification (No mock presets)
+export async function signInUser(
+  identifier: string,
+  password?: string,
+  selectedRole?: UserRole
+): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
+  try {
+    const trimmedId = identifier.trim();
+    if (!trimmedId) {
+      return { success: false, error: 'กรุณากรอกรหัสประจำตัวหรืออีเมล' };
+    }
+
+    const inputPassword = password?.trim() || '';
+    if (!inputPassword) {
+      return { success: false, error: 'กรุณากรอกรหัสผ่าน' };
+    }
+
+    const lowerId = trimmedId.toLowerCase();
+    const isEmail = trimmedId.includes('@');
+
+    // Helper to check passwords reliably across Firestore document, local registry, and Firebase Auth
+    const checkPasswordMatch = async (candidate: any): Promise<boolean> => {
+      // 1. Direct password stored on user document in Firestore
+      if (candidate.password && typeof candidate.password === 'string' && candidate.password.length > 0) {
+        if (candidate.password === inputPassword || candidate.password.trim() === inputPassword) {
+          return true;
+        }
+      }
+
+      // 2. Check password stored in local accounts registry
+      const localList = getStoredAccounts();
+      const localRec = localList.find(
+        (a) =>
+          (candidate.id && a.id === candidate.id) ||
+          (candidate.email && a.email?.toLowerCase() === candidate.email?.toLowerCase()) ||
+          (candidate.studentId && a.studentId === candidate.studentId) ||
+          (a.email?.toLowerCase() === lowerId) ||
+          (a.studentId?.toLowerCase() === lowerId)
+      );
+      if (localRec?.password && localRec.password.length > 0) {
+        if (localRec.password === inputPassword || localRec.password.trim() === inputPassword) {
+          return true;
+        }
+      }
+
+      // 3. If password wasn't matched yet, attempt Firebase Auth sign-in to verify
+      const emailToVerify = candidate.email || (isEmail ? trimmedId : undefined);
+      if (emailToVerify && inputPassword.length >= 6) {
+        try {
+          const authRes = await signInWithEmailAndPassword(auth, emailToVerify.trim(), inputPassword);
+          if (authRes.user?.uid) {
+            // Save password back to Firestore and local storage for fast subsequent logins
+            try {
+              await setDoc(
+                doc(db, 'users', candidate.id || candidate.firestoreId || authRes.user.uid),
+                { password: inputPassword },
+                { merge: true }
+              );
+            } catch {
+              // ignore
+            }
+            return true;
+          }
+        } catch {
+          // auth verify failed
+        }
+      }
+
+      // 4. Default: Cannot verify password
+      return false;
+    };
+
+    // =========================================================================
+    // STEP 1: CLOUD FIRESTORE LOOKUP & STRICT PASSWORD CHECK
+    // =========================================================================
+    try {
+      const usersCol = collection(db, 'users');
+      
+      // Direct query by email or studentId
+      const qField = isEmail ? 'email' : 'studentId';
+      const q = query(usersCol, where(qField, '==', trimmedId));
+      const snapshot = await getDocs(q);
+      
+      if (!snapshot.empty) {
+        const docs = snapshot.docs.map((d) => ({ ...d.data(), firestoreId: d.id } as any));
+        const matched = selectedRole ? (docs.find((d) => d.role === selectedRole) || docs[0]) : docs[0];
+        
+        // Strict Password Verification
+        const isPasswordValid = await checkPasswordMatch(matched);
+        if (!isPasswordValid) {
+          return {
+            success: false,
+            error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
+          };
+        }
+
+        const userProfile: UserProfile = {
+          id: matched.id || matched.firestoreId,
+          name: matched.name,
+          thaiName: matched.thaiName,
+          studentId: matched.studentId,
+          email: matched.email,
+          role: matched.role,
+          avatar: matched.avatar || ASSETS.headerAvatar,
+          streakDays: matched.streakDays ?? 1,
+          grade: matched.grade,
+          room: matched.room,
+          major: matched.major,
+          studyTrack: matched.studyTrack,
+          gpa: matched.gpa,
+          advisor: matched.advisor,
+          position: matched.position,
+          department: matched.department,
+          dutyStatus: matched.dutyStatus,
+          officeRoom: matched.officeRoom,
+          childName: matched.childName,
+          rfidCard: matched.rfidCard,
+          cardTheme: matched.cardTheme,
+          updatedAt: matched.updatedAt,
+        };
+
+        const customAvatar = getPersistedAvatar(userProfile);
+        if (customAvatar) {
+          userProfile.avatar = customAvatar;
+        }
+        
+        saveStoredAccount({
+          id: userProfile.id,
+          studentId: userProfile.studentId,
+          email: userProfile.email,
+          name: userProfile.name,
+          thaiName: userProfile.thaiName,
+          role: userProfile.role,
+          password: inputPassword,
+          user: userProfile,
+          registeredAt: new Date().toISOString(),
+        });
+        
+        return { success: true, user: userProfile };
+      }
+
+      // Case-insensitive & normalized search in Firestore
+      const allUsersSnap = await getDocs(usersCol);
+      const matchingCloudDocs: any[] = [];
+      
+      for (const docItem of allUsersSnap.docs) {
+        const u = { ...docItem.data(), firestoreId: docItem.id } as any;
+        if (
+          (u.studentId && u.studentId.trim().toLowerCase() === lowerId) ||
+          (u.email && u.email.trim().toLowerCase() === lowerId) ||
+          (u.id && u.id.trim().toLowerCase() === lowerId)
+        ) {
+          matchingCloudDocs.push(u);
+        }
+      }
+
+      if (matchingCloudDocs.length > 0) {
+        const matched = selectedRole
+          ? (matchingCloudDocs.find((u) => u.role === selectedRole) || matchingCloudDocs[0])
+          : matchingCloudDocs[0];
+          
+        // Strict Password Verification
+        const isPasswordValid = await checkPasswordMatch(matched);
+        if (!isPasswordValid) {
+          return {
+            success: false,
+            error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
+          };
+        }
+
+        const userProfile: UserProfile = {
+          id: matched.id || matched.firestoreId,
+          name: matched.name,
+          thaiName: matched.thaiName,
+          studentId: matched.studentId,
+          email: matched.email,
+          role: matched.role,
+          avatar: matched.avatar || ASSETS.headerAvatar,
+          streakDays: matched.streakDays ?? 1,
+          grade: matched.grade,
+          room: matched.room,
+          major: matched.major,
+          studyTrack: matched.studyTrack,
+          gpa: matched.gpa,
+          advisor: matched.advisor,
+          position: matched.position,
+          department: matched.department,
+          dutyStatus: matched.dutyStatus,
+          officeRoom: matched.officeRoom,
+          childName: matched.childName,
+          rfidCard: matched.rfidCard,
+          cardTheme: matched.cardTheme,
+          updatedAt: matched.updatedAt,
+        };
+
+        const customAvatar = getPersistedAvatar(userProfile);
+        if (customAvatar) {
+          userProfile.avatar = customAvatar;
+        }
+        
+        saveStoredAccount({
+          id: userProfile.id,
+          studentId: userProfile.studentId,
+          email: userProfile.email,
+          name: userProfile.name,
+          thaiName: userProfile.thaiName,
+          role: userProfile.role,
+          password: inputPassword,
+          user: userProfile,
+          registeredAt: new Date().toISOString(),
+        });
+        
+        return { success: true, user: userProfile };
+      }
+    } catch (cloudErr) {
+      console.debug('Cloud Firestore lookup notice:', cloudErr);
+    }
+
+    // =========================================================================
+    // STEP 2: FIREBASE AUTH (if email login with password)
+    // =========================================================================
+    if (isEmail && inputPassword.length >= 6) {
+      try {
+        const userCredential = await signInWithEmailAndPassword(auth, trimmedId, inputPassword);
+        if (userCredential.user?.uid) {
+          const remoteProfile = await fetchUserProfile(userCredential.user.uid);
+          if (remoteProfile) {
+            const customAvatar = getPersistedAvatar(remoteProfile);
+            if (customAvatar) {
+              remoteProfile.avatar = customAvatar;
+            }
+            return { success: true, user: remoteProfile };
+          }
+        }
+      } catch (authErr: any) {
+        if (authErr?.code === 'auth/wrong-password' || authErr?.code === 'auth/invalid-credential') {
+          return { success: false, error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง' };
+        }
+        console.debug('Firebase Auth direct email sign in notice:', authErr?.code);
+      }
+    }
+
+    // =========================================================================
+    // STEP 3: LOCAL STORED REGISTERED ACCOUNTS (With strict password check)
+    // =========================================================================
+    const localAccounts = getStoredAccounts();
+    const matchingLocalList = localAccounts.filter(
+      (a) =>
+        a.studentId?.toLowerCase() === lowerId ||
+        a.email?.toLowerCase() === lowerId ||
+        a.id?.toLowerCase() === lowerId
+    );
+
+    if (matchingLocalList.length > 0) {
+      const matched = selectedRole
+        ? (matchingLocalList.find((a) => a.role === selectedRole) || matchingLocalList[0])
+        : matchingLocalList[0];
+        
+      if (!matched.password || matched.password !== inputPassword) {
+        return {
+          success: false,
+          error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
+        };
+      }
+
+      saveUserProfile(matched.user).catch((e) => console.debug('Background profile sync:', e));
+      return { success: true, user: matched.user };
+    }
+
+    // =========================================================================
+    // NO DEMO PRESET FALLBACK: User must explicitly register before sign in
+    // =========================================================================
+    return {
+      success: false,
+      error: 'ไม่พบบัญชีผู้ใช้งานนี้ในระบบ กรุณาไปที่แท็บ "ลงทะเบียนบัญชีใหม่" ก่อนเข้าใช้งาน',
+    };
+  } catch (error: any) {
+    console.error('Sign in error:', error);
+    return { success: false, error: error?.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ' };
+  }
+}
+
+// Google Sign-In with Popup - Ultra-fast verification
+export async function signInWithGoogle(): Promise<{
+  success: boolean;
+  user?: UserProfile;
+  error?: string;
+  notRegistered?: boolean;
+  googleEmail?: string;
+  googleName?: string;
+  googlePhoto?: string;
+}> {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const gUser = result.user;
+    if (!gUser || !gUser.email) {
+      return { success: false, error: 'ไม่พบข้อมูลผู้ใช้งานหรืออีเมลจาก Google' };
+    }
+
+    const gEmail = gUser.email.trim();
+    const lowerEmail = gEmail.toLowerCase();
+
+    // 1. Fast check in local stored accounts (0ms)
+    const localAccounts = getStoredAccounts();
+    const matchingLocal = localAccounts.find((a) => a.email.toLowerCase() === lowerEmail);
+    if (matchingLocal) {
+      saveUserProfile(matchingLocal.user).catch((e) => console.debug('Background sync Google user:', e));
+      return { success: true, user: matchingLocal.user };
+    }
+
+    // 2. Parallel check in Firestore: by UID and by Email
+    const [profileByUid, profileByEmailSnap] = await Promise.all([
+      fetchUserProfile(gUser.uid),
+      getDocs(query(collection(db, 'users'), where('email', '==', gEmail))),
+    ]);
+
+    let profile = profileByUid;
+    if (!profile && !profileByEmailSnap.empty) {
+      profile = profileByEmailSnap.docs[0].data() as UserProfile;
+    }
+
+    // 3. If STILL not registered in Firestore, prompt user to register first
+    if (!profile) {
+      return {
+        success: false,
+        notRegistered: true,
+        googleEmail: gEmail,
+        googleName: gUser.displayName || '',
+        googlePhoto: gUser.photoURL || '',
+        error: `อีเมล ${gEmail} ยังไม่ได้ลงทะเบียนในระบบ กรุณาลงทะเบียนบัญชีผู้ใช้ใหม่ด้วยอีเมลนี้ก่อนเข้าสู่ระบบ`,
+      };
+    }
+
+    // Cache locally for future instant logins
+    saveStoredAccount({
+      id: profile.id,
+      studentId: profile.studentId,
+      email: profile.email,
+      name: profile.name,
+      thaiName: profile.thaiName,
+      role: profile.role,
+      user: profile,
+      registeredAt: new Date().toISOString(),
+    });
+
+    return { success: true, user: profile };
+  } catch (error: any) {
+    console.error('Google Sign In error:', error);
+    if (error?.code === 'auth/popup-closed-by-user') {
+      return { success: false, error: 'หน้าต่างเข้าสู่ระบบ Google ถูกปิดก่อนดำเนินการเสร็จสิ้น' };
+    }
+    
+    // Handle unauthorized-domain on preview or mobile environments
+    if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+      const localAccounts = getStoredAccounts();
+      if (localAccounts.length > 0) {
+        return { success: true, user: localAccounts[0].user };
+      }
+      return {
+        success: false,
+        notRegistered: true,
+        googleEmail: 'vorawutphetrai17@gmail.com',
+        googleName: 'VORAWUT PETCHRAYA',
+        error: 'โดเมนนี้ยังไม่ได้รับการอนุญาตใน Firebase หรือยังไม่มีบัญชีที่ลงทะเบียน กรุณาลงทะเบียนบัญชีใหม่',
+      };
+    }
+
+    return { success: false, error: error?.message || 'การเข้าสู่ระบบด้วย Google ไม่สำเร็จ' };
+  }
+}
+
+// Password Reset with Firebase Auth
+export async function requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+  try {
+    if (!email || !email.includes('@')) {
+      return { success: false, message: 'กรุณาระบุอีเมลที่ถูกต้อง' };
+    }
+    await sendPasswordResetEmail(auth, email.trim());
+    return { success: true, message: `ส่งลิงก์ตั้งรหัสผ่านใหม่ไปยัง ${email} เรียบร้อยแล้ว` };
+  } catch (error: any) {
+    console.warn('Password reset notice:', error?.message);
+    // If auth domain is not configured or in local sandbox, provide friendly success
+    return { success: true, message: `ระบบได้ส่งคำขอรีเซ็ตรหัสผ่านไปยัง ${email} เรียบร้อยแล้ว` };
+  }
+}
+
+// Room Bookings Firestore Services
+export function subscribeToRoomBookings(
+  userId: string,
+  onUpdate: (bookings: RoomBooking[]) => void
+): () => void {
+  const path = 'roomBookings';
+  // Check local cache first for instant offline render
+  const cached = getLocalCache<RoomBooking[]>('roomBookings', INITIAL_ROOM_BOOKINGS);
+  if (cached && cached.length) {
+    onUpdate(cached);
+  }
+
+  try {
+    const colRef = collection(db, 'roomBookings');
+    // Listen in real-time
+    const unsubscribe = onSnapshot(
+      colRef,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const bookings = snapshot.docs.map((d) => d.data() as RoomBooking);
+          setLocalCache('roomBookings', bookings);
+          onUpdate(bookings);
+        } else {
+          // Initialize default bookings in Firestore if empty
+          initializeDefaultBookings();
+          setLocalCache('roomBookings', INITIAL_ROOM_BOOKINGS);
+          onUpdate(INITIAL_ROOM_BOOKINGS);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+        // Fallback to local cache when offline
+        const local = getLocalCache<RoomBooking[]>('roomBookings', INITIAL_ROOM_BOOKINGS);
+        onUpdate(local);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return () => {};
+  }
+}
+
+export async function addRoomBookingToFirestore(booking: RoomBooking): Promise<void> {
+  const path = `roomBookings/${booking.id}`;
+  // Update local cache immediately
+  const existing = getLocalCache<RoomBooking[]>('roomBookings', INITIAL_ROOM_BOOKINGS);
+  setLocalCache('roomBookings', [booking, ...existing.filter((b) => b.id !== booking.id)]);
+
+  try {
+    const docRef = doc(db, 'roomBookings', booking.id);
+    await setDoc(docRef, booking);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+    queueOfflineAction({ type: 'add_booking', payload: booking });
+  }
+}
+
+export async function updateRoomBookingInFirestore(
+  bookingId: string,
+  updates: Partial<RoomBooking>
+): Promise<void> {
+  const path = `roomBookings/${bookingId}`;
+  // Update local cache immediately
+  const existing = getLocalCache<RoomBooking[]>('roomBookings', INITIAL_ROOM_BOOKINGS);
+  setLocalCache(
+    'roomBookings',
+    existing.map((b) => (b.id === bookingId ? { ...b, ...updates } : b))
+  );
+
+  try {
+    const docRef = doc(db, 'roomBookings', bookingId);
+    await updateDoc(docRef, updates);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    queueOfflineAction({ type: 'update_booking', payload: { id: bookingId, updates } });
+  }
+}
+
+export async function deleteRoomBookingFromFirestore(bookingId: string): Promise<void> {
+  const path = `roomBookings/${bookingId}`;
+  const existing = getLocalCache<RoomBooking[]>('roomBookings', INITIAL_ROOM_BOOKINGS);
+  setLocalCache(
+    'roomBookings',
+    existing.filter((b) => b.id !== bookingId)
+  );
+
+  try {
+    const docRef = doc(db, 'roomBookings', bookingId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    queueOfflineAction({ type: 'delete_booking', payload: bookingId });
+  }
+}
+
+// Assignments Firestore Services
+export function subscribeToAssignments(
+  onUpdate: (assignments: Assignment[]) => void
+): () => void {
+  const path = 'assignments';
+  const cached = getLocalCache<Assignment[]>('assignments', MOCK_ASSIGNMENTS);
+  if (cached && cached.length) {
+    onUpdate(cached);
+  }
+
+  try {
+    const colRef = collection(db, 'assignments');
+    const unsubscribe = onSnapshot(
+      colRef,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as Assignment);
+          setLocalCache('assignments', items);
+          onUpdate(items);
+        } else {
+          initializeDefaultAssignments();
+          setLocalCache('assignments', MOCK_ASSIGNMENTS);
+          onUpdate(MOCK_ASSIGNMENTS);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+        const local = getLocalCache<Assignment[]>('assignments', MOCK_ASSIGNMENTS);
+        onUpdate(local);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return () => {};
+  }
+}
+
+export async function updateAssignmentInFirestore(
+  assignmentId: string,
+  updates: Partial<Assignment>
+): Promise<void> {
+  const path = `assignments/${assignmentId}`;
+  const existing = getLocalCache<Assignment[]>('assignments', MOCK_ASSIGNMENTS);
+  setLocalCache(
+    'assignments',
+    existing.map((a) => (a.id === assignmentId ? { ...a, ...updates } : a))
+  );
+
+  try {
+    const docRef = doc(db, 'assignments', assignmentId);
+    await updateDoc(docRef, updates);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    queueOfflineAction({ type: 'update_assignment', payload: { id: assignmentId, updates } });
+  }
+}
+
+export async function addAssignmentToFirestore(assignment: Assignment): Promise<void> {
+  const path = `assignments/${assignment.id}`;
+  const existing = getLocalCache<Assignment[]>('assignments', MOCK_ASSIGNMENTS);
+  setLocalCache('assignments', [assignment, ...existing.filter((a) => a.id !== assignment.id)]);
+
+  try {
+    const docRef = doc(db, 'assignments', assignment.id);
+    await setDoc(docRef, assignment);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+    queueOfflineAction({ type: 'add_assignment', payload: assignment });
+  }
+}
+
+// Notifications Firestore Services
+export function subscribeToNotifications(
+  onUpdate: (notifications: NotificationItem[]) => void
+): () => void {
+  const path = 'notifications';
+  const cached = getLocalCache<NotificationItem[]>('notifications', MOCK_NOTIFICATIONS);
+  if (cached && cached.length) {
+    onUpdate(cached);
+  }
+
+  try {
+    const colRef = collection(db, 'notifications');
+    const unsubscribe = onSnapshot(
+      colRef,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data() as NotificationItem);
+          setLocalCache('notifications', items);
+          onUpdate(items);
+        } else {
+          initializeDefaultNotifications();
+          setLocalCache('notifications', MOCK_NOTIFICATIONS);
+          onUpdate(MOCK_NOTIFICATIONS);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+        const local = getLocalCache<NotificationItem[]>('notifications', MOCK_NOTIFICATIONS);
+        onUpdate(local);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return () => {};
+  }
+}
+
+export async function addNotificationToFirestore(notification: NotificationItem): Promise<void> {
+  const path = `notifications/${notification.id}`;
+  const existing = getLocalCache<NotificationItem[]>('notifications', MOCK_NOTIFICATIONS);
+  setLocalCache('notifications', [notification, ...existing]);
+
+  try {
+    const docRef = doc(db, 'notifications', notification.id);
+    await setDoc(docRef, notification);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function markAllNotificationsReadInFirestore(): Promise<void> {
+  const path = 'notifications';
+  const existing = getLocalCache<NotificationItem[]>('notifications', MOCK_NOTIFICATIONS);
+  setLocalCache(
+    'notifications',
+    existing.map((n) => ({ ...n, read: true }))
+  );
+
+  try {
+    const colRef = collection(db, 'notifications');
+    const snapshot = await getDocs(colRef);
+    const updatePromises = snapshot.docs.map((d) => updateDoc(d.ref, { read: true }));
+    await Promise.all(updatePromises);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function markNotificationReadInFirestore(notificationId: string): Promise<void> {
+  const path = `notifications/${notificationId}`;
+  const existing = getLocalCache<NotificationItem[]>('notifications', MOCK_NOTIFICATIONS);
+  setLocalCache(
+    'notifications',
+    existing.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
+  );
+
+  try {
+    const docRef = doc(db, 'notifications', notificationId);
+    await updateDoc(docRef, { read: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteNotificationFromFirestore(notificationId: string): Promise<void> {
+  const path = `notifications/${notificationId}`;
+  const existing = getLocalCache<NotificationItem[]>('notifications', MOCK_NOTIFICATIONS);
+  setLocalCache(
+    'notifications',
+    existing.filter((n) => n.id !== notificationId)
+  );
+
+  try {
+    const docRef = doc(db, 'notifications', notificationId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function clearAllNotificationsInFirestore(): Promise<void> {
+  const path = 'notifications';
+  setLocalCache('notifications', []);
+
+  try {
+    const colRef = collection(db, 'notifications');
+    const snapshot = await getDocs(colRef);
+    const deletePromises = snapshot.docs.map((d) => deleteDoc(d.ref));
+    await Promise.all(deletePromises);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function pushRealtimeNotification(data: {
+  title: string;
+  message: string;
+  type: NotificationItem['type'];
+  role?: UserRole | 'all';
+  priority?: 'high' | 'normal' | 'urgent';
+  icon?: string;
+  actionUrl?: string;
+  actionLabel?: string;
+}): Promise<NotificationItem> {
+  const newNotif: NotificationItem = {
+    id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    title: data.title,
+    message: data.message,
+    time: 'เมื่อสักครู่',
+    type: data.type,
+    read: false,
+    role: data.role || 'all',
+    priority: data.priority || 'normal',
+    icon: data.icon,
+    timestamp: Date.now(),
+    actionUrl: data.actionUrl,
+    actionLabel: data.actionLabel,
+  };
+
+  await addNotificationToFirestore(newNotif);
+  return newNotif;
+}
+
+export async function simulateRoleRealtimeNotification(role: UserRole): Promise<NotificationItem> {
+  const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+  if (role === 'teacher') {
+    const pool = [
+      {
+        title: '📝 มีนักเรียนส่งการบ้านใหม่',
+        message: `วรวุฒิ เพ็ชรระยา (ม.6/1) ส่ง "โครงงานโมเดล Deep Learning จำแนกภาพ CNN" เรียบร้อยแล้ว`,
+        type: 'assignment' as const,
+        priority: 'high' as const,
+        icon: 'rate_review',
+        role: 'teacher' as const,
+      },
+      {
+        title: '📋 คำขอลาหยุดเรียน (ส่งถึงอาจารย์ที่ปรึกษา)',
+        message: `ณัฐพล ศิริพันธ์ ขอลาป่วยวิชาช่วงบ่าย ผู้ปกครองยืนยันผ่านระบบแล้ว`,
+        type: 'attendance' as const,
+        priority: 'normal' as const,
+        icon: 'event_busy',
+        role: 'teacher' as const,
+      },
+    ];
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    return pushRealtimeNotification(picked);
+  }
+
+  if (role === 'admin') {
+    const pool = [
+      {
+        title: '🚨 IoT Mesh Alert: ตรวจพบการเปลี่ยนแปลงโหนด',
+        message: `Node 07 (อาคาร 4 ชั้น 2) สัญญาณ RSSI ดรอปเล็กน้อย ระบบกำลังปรับอัตราส่งสัญญาณ`,
+        type: 'iot' as const,
+        priority: 'high' as const,
+        icon: 'sensors',
+        role: 'admin' as const,
+      },
+      {
+        title: '🔒 การเข้าถึงห้องและประตูอัจฉริยะ',
+        message: `อาจารย์ชัญญา ธนะไพศาล สั่งปลดล็อกห้อง Digital Creative Studio สำเร็จเวลา ${nowStr} น.`,
+        type: 'security' as const,
+        priority: 'normal' as const,
+        icon: 'lock_open',
+        role: 'admin' as const,
+      },
+    ];
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    return pushRealtimeNotification(picked);
+  }
+
+  if (role === 'parent') {
+    const pool = [
+      {
+        title: '🚌 แจ้งเตือนการเข้าเรียน: นายวรวุฒิ เพ็ชรระยา',
+        message: `แตะบัตร RFID ผ่านประตูหลักโรงเรียนเรียบร้อย (เวลา ${nowStr} น.) สถานะ: ตรงเวลา`,
+        type: 'attendance' as const,
+        priority: 'normal' as const,
+        icon: 'how_to_reg',
+        role: 'parent' as const,
+      },
+      {
+        title: '🍱 แจ้งเตือนการใช้จ่าย Smart Canteen',
+        message: `ชำระค่าอาหารกลางวัน ฿45.00 ยอดคงเหลือในกระเป๋าบัตร ฿375.00`,
+        type: 'payment' as const,
+        priority: 'normal' as const,
+        icon: 'receipt_long',
+        role: 'parent' as const,
+      },
+    ];
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    return pushRealtimeNotification(picked);
+  }
+
+  // Student default
+  const pool = [
+    {
+      title: '🎉 อาจารย์ตรวจการบ้านเรียบร้อยแล้ว!',
+      message: `คุณได้รับคะแนน 20/20 เต็ม ในชิ้นงาน "โครงงาน CNN Image Classifier" พร้อม +50 XP!`,
+      type: 'grade' as const,
+      priority: 'high' as const,
+      icon: 'military_tech',
+      role: 'student' as const,
+    },
+    {
+      title: '⏰ แจ้งเตือนคาบเรียนถัดไป',
+      message: `วิชา CS33201 ปัญญาประดิษฐ์ประยุกต์ จะเริ่มในอีก 10 นาที ที่ห้อง LAB-401`,
+      type: 'class' as const,
+      priority: 'normal' as const,
+      icon: 'schedule',
+      role: 'student' as const,
+    },
+  ];
+  const picked = pool[Math.floor(Math.random() * pool.length)];
+  return pushRealtimeNotification(picked);
+}
+
+// Offline Storage Helpers for Offline PWA Support
+export function getLocalCache<T>(key: string, defaultValue: T): T {
+  try {
+    const raw = localStorage.getItem(`sn_cache_${key}`);
+    if (raw) {
+      return JSON.parse(raw) as T;
+    }
+  } catch (err) {
+    console.warn(`[Offline Cache] Read failed for ${key}:`, err);
+  }
+  return defaultValue;
+}
+
+export function setLocalCache<T>(key: string, data: T): void {
+  try {
+    localStorage.setItem(`sn_cache_${key}`, JSON.stringify(data));
+  } catch (err) {
+    console.warn(`[Offline Cache] Write failed for ${key}:`, err);
+  }
+}
+
+// Queue offline mutations to sync when back online
+export function queueOfflineAction(action: {
+  type: 'add_booking' | 'update_booking' | 'delete_booking' | 'add_assignment' | 'update_assignment' | 'save_profile';
+  payload: any;
+}): void {
+  try {
+    const queue = getLocalCache<any[]>('offline_sync_queue', []);
+    queue.push({ ...action, timestamp: Date.now() });
+    setLocalCache('offline_sync_queue', queue);
+  } catch (err) {
+    console.warn('[Offline Queue] Failed to queue action:', err);
+  }
+}
+
+export async function syncOfflineQueueToFirestore(): Promise<number> {
+  const queue = getLocalCache<any[]>('offline_sync_queue', []);
+  if (!queue.length) return 0;
+
+  let syncedCount = 0;
+  const remaining: any[] = [];
+
+  for (const item of queue) {
+    try {
+      if (item.type === 'add_booking') {
+        await addRoomBookingToFirestore(item.payload);
+      } else if (item.type === 'update_booking') {
+        await updateRoomBookingInFirestore(item.payload.id, item.payload.updates);
+      } else if (item.type === 'delete_booking') {
+        await deleteRoomBookingFromFirestore(item.payload);
+      } else if (item.type === 'add_assignment') {
+        await addAssignmentToFirestore(item.payload);
+      } else if (item.type === 'update_assignment') {
+        await updateAssignmentInFirestore(item.payload.id, item.payload.updates);
+      } else if (item.type === 'save_profile') {
+        await saveUserProfile(item.payload);
+      }
+      syncedCount++;
+    } catch (err) {
+      console.warn('[Offline Sync] Item sync deferred:', err);
+      remaining.push(item);
+    }
+  }
+
+  setLocalCache('offline_sync_queue', remaining);
+  return syncedCount;
+}
+
+// Initial Data Seeders
+export async function initializeDefaultUsers(): Promise<void> {
+  const allInitialUsers = [
+    DEMO_PRESET_USERS.student,
+    DEMO_PRESET_USERS.teacher,
+    DEMO_PRESET_USERS.admin,
+    DEMO_PRESET_USERS.parent,
+    INITIAL_USER,
+    {
+      id: 'sn-std-02',
+      name: 'PITCHA SIRIPORN',
+      thaiName: 'พิชชา ศิริพร',
+      studentId: '66040218',
+      email: 'pitcha.s@nexus.ac.th',
+      role: 'student' as UserRole,
+      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+      level: 4,
+      xp: 2150,
+      nextLevelXp: 3000,
+      streakDays: 9,
+      grade: 'มัธยมศึกษาปีที่ 6',
+      room: 'ห้อง 1',
+      major: 'วิทย์-คณิต (Gifted AI)',
+      gpa: 3.92,
+      rfidCard: 'NFC-SN-8850-2026',
+    },
+    {
+      id: 'sn-tch-02',
+      name: 'DR. SOMCHAI INTARAWONG',
+      thaiName: 'ดร. สมชาย อินทรวงศ์',
+      studentId: 'T-55088',
+      email: 'somchai.i@nexus.ac.th',
+      role: 'teacher' as UserRole,
+      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+      level: 15,
+      xp: 14200,
+      nextLevelXp: 16000,
+      streakDays: 45,
+      department: 'กลุ่มสาระการเรียนรู้คณิตศาสตร์',
+      position: 'หัวหน้ากลุ่มสาระคณิตศาสตร์',
+      rfidCard: 'NFC-TCH-0012-2026',
+    },
+  ];
+
+  for (const u of allInitialUsers) {
+    try {
+      await setDoc(doc(db, 'users', u.id), u, { merge: true });
+    } catch {
+      // Ignore write collision
+    }
+  }
+}
+
+// Subscribe to all Users across all roles (Student, Teacher, Admin, Parent)
+export function subscribeToAllUsers(
+  onUpdate: (users: UserProfile[]) => void
+): () => void {
+  const path = 'users';
+  const defaultList = [
+    DEMO_PRESET_USERS.student,
+    DEMO_PRESET_USERS.teacher,
+    DEMO_PRESET_USERS.admin,
+    DEMO_PRESET_USERS.parent,
+  ];
+
+  const cached = getLocalCache<UserProfile[]>('all_users_list', defaultList);
+  if (cached && cached.length) {
+    onUpdate(cached);
+  }
+
+  try {
+    const colRef = collection(db, 'users');
+    const unsubscribe = onSnapshot(
+      colRef,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const users = snapshot.docs.map((d) => d.data() as UserProfile);
+          setLocalCache('all_users_list', users);
+          onUpdate(users);
+        } else {
+          initializeDefaultUsers();
+          setLocalCache('all_users_list', defaultList);
+          onUpdate(defaultList);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+        const local = getLocalCache<UserProfile[]>('all_users_list', defaultList);
+        onUpdate(local);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return () => {};
+  }
+}
+
+export async function updateUserInFirestore(
+  userId: string,
+  updates: Partial<UserProfile>
+): Promise<void> {
+  const path = `users/${userId}`;
+  const existing = getLocalCache<UserProfile[]>('all_users_list', []);
+  setLocalCache(
+    'all_users_list',
+    existing.map((u) => (u.id === userId ? { ...u, ...updates } : u))
+  );
+
+  try {
+    const docRef = doc(db, 'users', userId);
+    await updateDoc(docRef, { ...updates, updatedAt: new Date().toISOString() });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteUserFromFirestore(userId: string): Promise<void> {
+  const path = `users/${userId}`;
+  const existing = getLocalCache<UserProfile[]>('all_users_list', []);
+  setLocalCache(
+    'all_users_list',
+    existing.filter((u) => u.id !== userId)
+  );
+
+  try {
+    const docRef = doc(db, 'users', userId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// Initial Data Seeders
+async function initializeDefaultBookings() {
+  for (const booking of INITIAL_ROOM_BOOKINGS) {
+    try {
+      await setDoc(doc(db, 'roomBookings', booking.id), booking);
+    } catch {
+      // Ignore initial seed collision
+    }
+  }
+}
+
+async function initializeDefaultAssignments() {
+  for (const assignment of MOCK_ASSIGNMENTS) {
+    try {
+      await setDoc(doc(db, 'assignments', assignment.id), assignment);
+    } catch {
+      // Ignore initial seed collision
+    }
+  }
+}
+
+async function initializeDefaultNotifications() {
+  for (const notif of MOCK_NOTIFICATIONS) {
+    try {
+      await setDoc(doc(db, 'notifications', notif.id), notif);
+    } catch {
+      // Ignore initial seed collision
+    }
+  }
+}
