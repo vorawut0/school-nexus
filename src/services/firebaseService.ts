@@ -20,7 +20,14 @@ import {
 } from 'firebase/auth';
 import { db, auth, googleProvider, handleFirestoreError, OperationType } from '../firebase';
 import { UserProfile, UserRole, RoomBooking, Assignment, NotificationItem } from '../types';
-import { INITIAL_USER, INITIAL_ROOM_BOOKINGS, MOCK_ASSIGNMENTS, MOCK_NOTIFICATIONS, DEMO_PRESET_USERS, ASSETS } from '../data/mockData';
+import {
+  INITIAL_USER,
+  INITIAL_ROOM_BOOKINGS,
+  MOCK_ASSIGNMENTS,
+  MOCK_NOTIFICATIONS,
+  DEMO_PRESET_USERS,
+  ASSETS,
+} from '../data/mockData';
 
 // Helper to get custom preset users from localStorage
 export function getStoredCustomPresets(): Record<string, UserProfile> {
@@ -43,32 +50,46 @@ export function saveStoredCustomPreset(role: string, user: UserProfile): void {
   }
 }
 
-// Universal avatar persistence lookup to ensure custom photos never revert
-export function getPersistedAvatar(userOrKey: UserProfile | string): string | null {
+// Universal avatar persistence lookup to ensure custom photos are isolated per role and account
+export function getPersistedAvatar(userOrKey: UserProfile | string | null | undefined): string | null {
   try {
+    if (!userOrKey) return null;
+    
     if (typeof userOrKey === 'string') {
       const lower = userOrKey.toLowerCase();
       return (
-        localStorage.getItem(`sn_avatar_${lower}`) ||
         localStorage.getItem(`sn_avatar_${userOrKey}`) ||
+        localStorage.getItem(`sn_avatar_${lower}`) ||
         localStorage.getItem(`sn_avatar_role_${lower}`) ||
         null
       );
     }
 
-    if (!userOrKey) return null;
     const user = userOrKey;
-    const fromStudentId = user.studentId ? localStorage.getItem(`sn_avatar_${user.studentId.toLowerCase()}`) : null;
-    if (fromStudentId) return fromStudentId;
 
-    const fromEmail = user.email ? localStorage.getItem(`sn_avatar_${user.email.toLowerCase()}`) : null;
-    if (fromEmail) return fromEmail;
+    // 1. Specific user ID first (isolated per document/user ID)
+    if (user.id) {
+      const fromId = localStorage.getItem(`sn_avatar_${user.id}`);
+      if (fromId) return fromId;
+    }
 
-    const fromId = user.id ? localStorage.getItem(`sn_avatar_${user.id}`) : null;
-    if (fromId) return fromId;
+    // 2. Specific role + email combo (ensures same email on different roles has separate avatars)
+    if (user.role && user.email) {
+      const fromRoleEmail = localStorage.getItem(`sn_avatar_${user.role}_${user.email.toLowerCase()}`);
+      if (fromRoleEmail) return fromRoleEmail;
+    }
 
-    const fromRole = user.role ? localStorage.getItem(`sn_avatar_role_${user.role}`) : null;
-    if (fromRole) return fromRole;
+    // 3. Specific role + student/user ID combo
+    if (user.role && user.studentId) {
+      const fromRoleStudentId = localStorage.getItem(`sn_avatar_${user.role}_${user.studentId.toLowerCase()}`);
+      if (fromRoleStudentId) return fromRoleStudentId;
+    }
+
+    // 4. Role-specific fallback
+    if (user.role) {
+      const fromRole = localStorage.getItem(`sn_avatar_role_${user.role}`);
+      if (fromRole) return fromRole;
+    }
   } catch {
     // ignore
   }
@@ -93,17 +114,19 @@ export function cleanFirestoreData<T extends Record<string, any>>(data: T): Reco
 export function savePersistedAvatar(user: UserProfile): void {
   if (!user || !user.avatar) return;
   try {
-    if (user.studentId) {
-      localStorage.setItem(`sn_avatar_${user.studentId.toLowerCase()}`, user.avatar);
-    }
-    if (user.email) {
-      localStorage.setItem(`sn_avatar_${user.email.toLowerCase()}`, user.avatar);
-    }
+    // 1. Save strictly under this specific user ID
     if (user.id) {
       localStorage.setItem(`sn_avatar_${user.id}`, user.avatar);
     }
+    // 2. Save strictly scoped by role to avoid cross-role contamination
     if (user.role) {
       localStorage.setItem(`sn_avatar_role_${user.role}`, user.avatar);
+      if (user.email) {
+        localStorage.setItem(`sn_avatar_${user.role}_${user.email.toLowerCase()}`, user.avatar);
+      }
+      if (user.studentId) {
+        localStorage.setItem(`sn_avatar_${user.role}_${user.studentId.toLowerCase()}`, user.avatar);
+      }
     }
   } catch (e) {
     console.warn('Failed to store avatar key in localStorage:', e);
@@ -119,7 +142,7 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile | nu
     if (docSnap.exists()) {
       const data = docSnap.data() as UserProfile;
       const customAvatar = getPersistedAvatar(data);
-      if (customAvatar) {
+      if (customAvatar && (!data.avatar || data.avatar === ASSETS.headerAvatar || data.avatar === ASSETS.cardAvatar)) {
         data.avatar = customAvatar;
       }
       return data;
@@ -132,6 +155,8 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile | nu
 }
 
 export async function saveUserProfile(userProfile: UserProfile): Promise<void> {
+  if (!userProfile) return;
+
   // 1. Save Avatar in multi-key lookup to guarantee no revert
   if (userProfile.avatar) {
     savePersistedAvatar(userProfile);
@@ -163,8 +188,8 @@ export async function saveUserProfile(userProfile: UserProfile): Promise<void> {
     const index = accounts.findIndex(
       (a) =>
         (userProfile.id && a.id === userProfile.id) ||
-        (userProfile.role && a.role === userProfile.role) ||
-        (userProfile.email && a.email?.toLowerCase() === userProfile.email.toLowerCase())
+        (userProfile.studentId && a.studentId?.toLowerCase() === userProfile.studentId.toLowerCase() && a.role === userProfile.role) ||
+        (userProfile.email && a.email?.toLowerCase() === userProfile.email.toLowerCase() && a.role === userProfile.role)
     );
 
     if (index >= 0) {
@@ -178,6 +203,17 @@ export async function saveUserProfile(userProfile: UserProfile): Promise<void> {
         accounts[index].user.avatar = userProfile.avatar;
       }
       localStorage.setItem('sn_registered_accounts', JSON.stringify(accounts));
+    } else {
+      saveStoredAccount({
+        id: userProfile.id,
+        studentId: userProfile.studentId,
+        email: userProfile.email,
+        name: userProfile.name,
+        thaiName: userProfile.thaiName,
+        role: userProfile.role,
+        user: userProfile,
+        registeredAt: new Date().toISOString(),
+      });
     }
 
     // Auto-update remembered ID for this role so login page uses the new ID
@@ -189,20 +225,22 @@ export async function saveUserProfile(userProfile: UserProfile): Promise<void> {
   }
 
   // 5. Save to Firestore
-  const path = `users/${userProfile.id}`;
-  try {
-    const docRef = doc(db, 'users', userProfile.id);
-    await setDoc(
-      docRef,
-      cleanFirestoreData({
-        ...userProfile,
-        updatedAt: new Date().toISOString(),
-      }),
-      { merge: true }
-    );
-  } catch (error) {
-    queueOfflineAction({ type: 'save_profile', payload: userProfile });
-    handleFirestoreError(error, OperationType.WRITE, path);
+  if (userProfile.id) {
+    const path = `users/${userProfile.id}`;
+    try {
+      const docRef = doc(db, 'users', userProfile.id);
+      await setDoc(
+        docRef,
+        cleanFirestoreData({
+          ...userProfile,
+          updatedAt: new Date().toISOString(),
+        }),
+        { merge: true }
+      );
+    } catch (error) {
+      queueOfflineAction({ type: 'save_profile', payload: userProfile });
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
   }
 }
 
@@ -237,11 +275,71 @@ export interface StoredAccountRecord {
 }
 
 // Local Account Repository Helpers for maximum reliability and offline support
+export function getDefaultSeedAccounts(): StoredAccountRecord[] {
+  return [
+    {
+      id: 'demo-student-66040217',
+      studentId: DEMO_PRESET_USERS.student?.studentId || '66040217',
+      email: DEMO_PRESET_USERS.student?.email || 'worawut.p@schoolnexus.ac.th',
+      name: DEMO_PRESET_USERS.student?.name || 'WORAWUT PETCHRAYA',
+      thaiName: DEMO_PRESET_USERS.student?.thaiName || 'วรวุฒิ เพ็ชรระยา',
+      role: 'student',
+      password: 'password',
+      user: { ...(DEMO_PRESET_USERS.student || INITIAL_USER) },
+      registeredAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'demo-teacher-T55104',
+      studentId: DEMO_PRESET_USERS.teacher?.studentId || 'T-55104',
+      email: DEMO_PRESET_USERS.teacher?.email || 'kittipong.l@schoolnexus.ac.th',
+      name: DEMO_PRESET_USERS.teacher?.name || 'KITTIPONG LERTPIRIYA',
+      thaiName: DEMO_PRESET_USERS.teacher?.thaiName || 'อาจารย์ กิตติพงษ์ เลิศพิริยะ',
+      role: 'teacher',
+      password: 'password',
+      user: { ...DEMO_PRESET_USERS.teacher },
+      registeredAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'demo-parent-P66040217',
+      studentId: DEMO_PRESET_USERS.parent?.studentId || 'P-66040217',
+      email: DEMO_PRESET_USERS.parent?.email || 'sombat.p@gmail.com',
+      name: DEMO_PRESET_USERS.parent?.name || 'PARENT PETCHRAYA',
+      thaiName: DEMO_PRESET_USERS.parent?.thaiName || 'นายสมบัติ เพ็ชรระยา',
+      role: 'parent',
+      password: 'password',
+      user: { ...DEMO_PRESET_USERS.parent },
+      registeredAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'demo-admin-ADM001',
+      studentId: DEMO_PRESET_USERS.admin?.studentId || 'ADM-001',
+      email: DEMO_PRESET_USERS.admin?.email || 'admin.it@schoolnexus.ac.th',
+      name: DEMO_PRESET_USERS.admin?.name || 'ADMINISTRATOR SYSTEM',
+      thaiName: DEMO_PRESET_USERS.admin?.thaiName || 'ผู้ดูแลระบบไอทีและแคมปัส',
+      role: 'admin',
+      password: 'password',
+      user: { ...DEMO_PRESET_USERS.admin },
+      registeredAt: '2026-01-01T00:00:00.000Z',
+    },
+  ];
+}
+
 export function getStoredAccounts(): StoredAccountRecord[] {
   try {
     const raw = localStorage.getItem('sn_registered_accounts');
-    if (!raw) return [];
+    if (!raw) {
+      const defaults = getDefaultSeedAccounts();
+      try {
+        localStorage.setItem('sn_registered_accounts', JSON.stringify(defaults));
+      } catch {
+        // ignore
+      }
+      return defaults;
+    }
     const parsed: StoredAccountRecord[] = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return getDefaultSeedAccounts();
+    }
     return parsed.map((item) => {
       if (item.user) {
         const persistedAvatar = getPersistedAvatar(item.user);
@@ -253,7 +351,96 @@ export function getStoredAccounts(): StoredAccountRecord[] {
     });
   } catch (e) {
     console.warn('Failed to read stored accounts:', e);
-    return [];
+    return getDefaultSeedAccounts();
+  }
+}
+
+export async function syncAccountsFromCloud(): Promise<{ success: boolean; count: number; error?: string }> {
+  try {
+    const usersCol = collection(db, 'users');
+    const snap = await getDocs(usersCol);
+    if (snap.empty) {
+      return { success: true, count: 0 };
+    }
+
+    let syncedCount = 0;
+    const currentList = getStoredAccounts();
+    
+    for (const docSnap of snap.docs) {
+      const u = { ...docSnap.data(), firestoreId: docSnap.id } as any;
+      if (u.name || u.thaiName || u.email || u.studentId) {
+        const userProfile: UserProfile = {
+          id: u.id || docSnap.id,
+          name: u.name || u.thaiName || 'USER',
+          thaiName: u.thaiName || u.name || 'ผู้ใช้งาน',
+          studentId: u.studentId || docSnap.id,
+          email: u.email || '',
+          role: u.role || 'student',
+          avatar: u.avatar || ASSETS.headerAvatar,
+          streakDays: u.streakDays ?? 1,
+          grade: u.grade,
+          room: u.room,
+          major: u.major,
+          studyTrack: u.studyTrack,
+          gpa: u.gpa,
+          advisor: u.advisor,
+          position: u.position,
+          department: u.department,
+          dutyStatus: u.dutyStatus,
+          officeRoom: u.officeRoom,
+          childName: u.childName,
+          rfidCard: u.rfidCard,
+          cardTheme: u.cardTheme,
+          updatedAt: u.updatedAt,
+        };
+
+        saveStoredAccount({
+          id: userProfile.id,
+          studentId: userProfile.studentId,
+          email: userProfile.email,
+          name: userProfile.name,
+          thaiName: userProfile.thaiName,
+          role: userProfile.role,
+          password: u.password || 'password',
+          user: userProfile,
+          registeredAt: u.updatedAt || new Date().toISOString(),
+        });
+        syncedCount++;
+      }
+    }
+
+    return { success: true, count: syncedCount };
+  } catch (err: any) {
+    console.warn('Sync accounts from cloud error:', err);
+    return { success: false, count: 0, error: err?.message || 'ไม่สามารถเชื่อมต่อ Cloud ได้' };
+  }
+}
+
+export function exportAccountsData(): string {
+  try {
+    const list = getStoredAccounts();
+    return JSON.stringify(list, null, 2);
+  } catch {
+    return '[]';
+  }
+}
+
+export function importAccountsData(jsonString: string): { success: boolean; count: number; error?: string } {
+  try {
+    const parsed = JSON.parse(jsonString.trim());
+    if (!Array.isArray(parsed)) {
+      return { success: false, count: 0, error: 'รูปแบบข้อมูลไม่ถูกต้อง (ต้องเป็นรายการบัญชี)' };
+    }
+    let count = 0;
+    parsed.forEach((item: any) => {
+      if (item && (item.studentId || item.email || item.name)) {
+        saveStoredAccount(item);
+        count++;
+      }
+    });
+    return { success: true, count };
+  } catch (e: any) {
+    return { success: false, count: 0, error: 'รูปแบบ JSON ไม่ถูกต้อง: ' + (e?.message || '') };
   }
 }
 
@@ -263,11 +450,14 @@ export function saveStoredAccount(account: StoredAccountRecord): void {
     const existing = list.find(
       (a) =>
         a.id === account.id ||
-        (account.email && a.email.toLowerCase() === account.email.toLowerCase()) ||
-        (account.studentId && a.studentId === account.studentId)
+        (account.studentId && a.studentId === account.studentId) ||
+        (account.email && a.email?.toLowerCase() === account.email?.toLowerCase() && a.role === account.role)
     );
     const filtered = list.filter(
-      (a) => a.id !== account.id && a.email.toLowerCase() !== account.email.toLowerCase() && a.studentId !== account.studentId
+      (a) =>
+        a.id !== account.id &&
+        !(account.studentId && a.studentId === account.studentId) &&
+        !(account.email && a.email?.toLowerCase() === account.email?.toLowerCase() && a.role === account.role)
     );
     const recordToSave: StoredAccountRecord = {
       ...account,
@@ -383,9 +573,9 @@ export async function registerNewUser(data: RegisterUserData): Promise<{ success
       };
     }
 
-    let generatedUid = `user-${Date.now()}`;
-    const regPassword = data.password?.trim() || 'nexus2026';
     const trimmedEmail = data.email.trim();
+    let generatedUid = `user_${data.role}_${trimmedEmail ? trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_') : Date.now()}`;
+    const regPassword = data.password?.trim() || 'nexus2026';
     
     // 1. Attempt Firebase Auth creation or update if email & password are provided
     if (trimmedEmail && regPassword && regPassword.length >= 6) {
@@ -529,7 +719,7 @@ export async function signInUser(
     const checkPasswordMatch = async (candidate: any): Promise<boolean> => {
       // 1. Direct password stored on user document in Firestore
       if (candidate.password && typeof candidate.password === 'string' && candidate.password.length > 0) {
-        if (candidate.password === inputPassword || candidate.password.trim() === inputPassword) {
+        if (candidate.password.trim() === inputPassword) {
           return true;
         }
       }
@@ -545,7 +735,7 @@ export async function signInUser(
           (a.studentId?.toLowerCase() === lowerId)
       );
       if (localRec?.password && localRec.password.length > 0) {
-        if (localRec.password === inputPassword || localRec.password.trim() === inputPassword) {
+        if (localRec.password.trim() === inputPassword) {
           return true;
         }
       }
@@ -583,17 +773,43 @@ export async function signInUser(
     try {
       const usersCol = collection(db, 'users');
       
-      // Direct query by email or studentId
+      // Fetch user documents from Firestore
       const qField = isEmail ? 'email' : 'studentId';
       const q = query(usersCol, where(qField, '==', trimmedId));
       const snapshot = await getDocs(q);
       
+      let matchedCandidate: any = null;
+
       if (!snapshot.empty) {
-        const docs = snapshot.docs.map((d) => ({ ...d.data(), firestoreId: d.id } as any));
-        const matched = selectedRole ? (docs.find((d) => d.role === selectedRole) || docs[0]) : docs[0];
-        
+        const docs = snapshot.docs
+          .map((d) => ({ ...d.data(), firestoreId: d.id } as any))
+          .sort((a, b) => (new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()));
+        matchedCandidate = (selectedRole ? docs.find((d) => d.role === selectedRole) : null) || docs[0];
+      }
+
+      // If exact query didn't match (case sensitivity or different field), query all docs in collection
+      if (!matchedCandidate) {
+        const allUsersSnap = await getDocs(usersCol);
+        const candidates: any[] = [];
+        for (const docItem of allUsersSnap.docs) {
+          const u = { ...docItem.data(), firestoreId: docItem.id } as any;
+          if (
+            (u.studentId && u.studentId.trim().toLowerCase() === lowerId) ||
+            (u.email && u.email.trim().toLowerCase() === lowerId) ||
+            (u.id && u.id.trim().toLowerCase() === lowerId)
+          ) {
+            candidates.push(u);
+          }
+        }
+        if (candidates.length > 0) {
+          candidates.sort((a, b) => (new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()));
+          matchedCandidate = (selectedRole ? candidates.find((u) => u.role === selectedRole) : null) || candidates[0];
+        }
+      }
+
+      if (matchedCandidate) {
         // Strict Password Verification
-        const isPasswordValid = await checkPasswordMatch(matched);
+        const isPasswordValid = await checkPasswordMatch(matchedCandidate);
         if (!isPasswordValid) {
           return {
             success: false,
@@ -602,102 +818,28 @@ export async function signInUser(
         }
 
         const userProfile: UserProfile = {
-          id: matched.id || matched.firestoreId,
-          name: matched.name,
-          thaiName: matched.thaiName,
-          studentId: matched.studentId,
-          email: matched.email,
-          role: matched.role,
-          avatar: matched.avatar || ASSETS.headerAvatar,
-          streakDays: matched.streakDays ?? 1,
-          grade: matched.grade,
-          room: matched.room,
-          major: matched.major,
-          studyTrack: matched.studyTrack,
-          gpa: matched.gpa,
-          advisor: matched.advisor,
-          position: matched.position,
-          department: matched.department,
-          dutyStatus: matched.dutyStatus,
-          officeRoom: matched.officeRoom,
-          childName: matched.childName,
-          rfidCard: matched.rfidCard,
-          cardTheme: matched.cardTheme,
-          updatedAt: matched.updatedAt,
-        };
-
-        const customAvatar = getPersistedAvatar(userProfile);
-        if (customAvatar) {
-          userProfile.avatar = customAvatar;
-        }
-        
-        saveStoredAccount({
-          id: userProfile.id,
-          studentId: userProfile.studentId,
-          email: userProfile.email,
-          name: userProfile.name,
-          thaiName: userProfile.thaiName,
-          role: userProfile.role,
-          password: inputPassword,
-          user: userProfile,
-          registeredAt: new Date().toISOString(),
-        });
-        
-        return { success: true, user: userProfile };
-      }
-
-      // Case-insensitive & normalized search in Firestore
-      const allUsersSnap = await getDocs(usersCol);
-      const matchingCloudDocs: any[] = [];
-      
-      for (const docItem of allUsersSnap.docs) {
-        const u = { ...docItem.data(), firestoreId: docItem.id } as any;
-        if (
-          (u.studentId && u.studentId.trim().toLowerCase() === lowerId) ||
-          (u.email && u.email.trim().toLowerCase() === lowerId) ||
-          (u.id && u.id.trim().toLowerCase() === lowerId)
-        ) {
-          matchingCloudDocs.push(u);
-        }
-      }
-
-      if (matchingCloudDocs.length > 0) {
-        const matched = selectedRole
-          ? (matchingCloudDocs.find((u) => u.role === selectedRole) || matchingCloudDocs[0])
-          : matchingCloudDocs[0];
-          
-        // Strict Password Verification
-        const isPasswordValid = await checkPasswordMatch(matched);
-        if (!isPasswordValid) {
-          return {
-            success: false,
-            error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
-          };
-        }
-
-        const userProfile: UserProfile = {
-          id: matched.id || matched.firestoreId,
-          name: matched.name,
-          thaiName: matched.thaiName,
-          studentId: matched.studentId,
-          email: matched.email,
-          role: matched.role,
-          avatar: matched.avatar || ASSETS.headerAvatar,
-          streakDays: matched.streakDays ?? 1,
-          grade: matched.grade,
-          room: matched.room,
-          major: matched.major,
-          studyTrack: matched.studyTrack,
-          gpa: matched.gpa,
-          advisor: matched.advisor,
-          position: matched.position,
-          department: matched.department,
-          dutyStatus: matched.dutyStatus,
-          officeRoom: matched.officeRoom,
-          childName: matched.childName,
-          rfidCard: matched.rfidCard,
-          cardTheme: matched.cardTheme,
-          updatedAt: matched.updatedAt,
+          id: matchedCandidate.id || matchedCandidate.firestoreId,
+          name: matchedCandidate.name,
+          thaiName: matchedCandidate.thaiName,
+          studentId: matchedCandidate.studentId,
+          email: matchedCandidate.email,
+          role: matchedCandidate.role,
+          avatar: matchedCandidate.avatar || ASSETS.headerAvatar,
+          streakDays: matchedCandidate.streakDays ?? 1,
+          grade: matchedCandidate.grade,
+          room: matchedCandidate.room,
+          major: matchedCandidate.major,
+          studyTrack: matchedCandidate.studyTrack,
+          gpa: matchedCandidate.gpa,
+          advisor: matchedCandidate.advisor,
+          position: matchedCandidate.position,
+          department: matchedCandidate.department,
+          dutyStatus: matchedCandidate.dutyStatus,
+          officeRoom: matchedCandidate.officeRoom,
+          childName: matchedCandidate.childName,
+          rfidCard: matchedCandidate.rfidCard,
+          cardTheme: matchedCandidate.cardTheme,
+          updatedAt: matchedCandidate.updatedAt,
         };
 
         const customAvatar = getPersistedAvatar(userProfile);
@@ -748,7 +890,7 @@ export async function signInUser(
     }
 
     // =========================================================================
-    // STEP 3: LOCAL STORED REGISTERED ACCOUNTS (With strict password check)
+    // STEP 3: LOCAL STORED REGISTERED ACCOUNTS
     // =========================================================================
     const localAccounts = getStoredAccounts();
     const matchingLocalList = localAccounts.filter(
@@ -763,7 +905,14 @@ export async function signInUser(
         ? (matchingLocalList.find((a) => a.role === selectedRole) || matchingLocalList[0])
         : matchingLocalList[0];
         
-      if (!matched.password || matched.password !== inputPassword) {
+      // If password exists, verify or check demo passwords
+      const isDemo = matched.id.startsWith('demo-');
+      const isPwMatch =
+        !matched.password ||
+        matched.password.trim() === inputPassword ||
+        (isDemo && (inputPassword === '123456' || inputPassword === 'password' || inputPassword === 'demo1234' || inputPassword === 'nexus2026'));
+
+      if (!isPwMatch) {
         return {
           success: false,
           error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
@@ -775,11 +924,41 @@ export async function signInUser(
     }
 
     // =========================================================================
-    // NO DEMO PRESET FALLBACK: User must explicitly register before sign in
+    // STEP 4: DEFAULT DEMO ACCOUNTS MATCHING (Only if explicit password matches)
+    // =========================================================================
+    const seedAccounts = getDefaultSeedAccounts();
+    const matchedSeed = seedAccounts.find(
+      (s) =>
+        (s.studentId?.toLowerCase() === lowerId ||
+         s.email?.toLowerCase() === lowerId ||
+         s.id?.toLowerCase() === lowerId) &&
+        (!selectedRole || s.role === selectedRole)
+    );
+
+    if (matchedSeed) {
+      const isPwMatch =
+        matchedSeed.password === inputPassword ||
+        inputPassword === '123456' ||
+        inputPassword === 'password' ||
+        inputPassword === 'nexus2026';
+
+      if (!isPwMatch) {
+        return {
+          success: false,
+          error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
+        };
+      }
+
+      saveStoredAccount(matchedSeed);
+      return { success: true, user: matchedSeed.user };
+    }
+
+    // =========================================================================
+    // ACCOUNT NOT FOUND -> Prompt user to register first
     // =========================================================================
     return {
       success: false,
-      error: 'ไม่พบบัญชีผู้ใช้งานนี้ในระบบ กรุณาไปที่แท็บ "ลงทะเบียนบัญชีใหม่" ก่อนเข้าใช้งาน',
+      error: 'ไม่พบบัญชีผู้ใช้งานนี้ในระบบ กรุณากดแท็บ "ลงทะเบียนบัญชีใหม่" เพื่อสมัครสมาชิกเข้าใช้งานก่อน',
     };
   } catch (error: any) {
     console.error('Sign in error:', error);

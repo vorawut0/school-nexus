@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ASSETS } from '../data/mockData';
 import { UserProfile, UserRole } from '../types';
 import {
@@ -8,6 +8,12 @@ import {
   requestPasswordReset,
   clearAllRegisteredAccounts,
   removeStoredAccount,
+  getStoredAccounts,
+  StoredAccountRecord,
+  syncAccountsFromCloud,
+  exportAccountsData,
+  importAccountsData,
+  getDefaultSeedAccounts,
 } from '../services/firebaseService';
 
 interface LoginScreenProps {
@@ -97,13 +103,87 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [regAvatar, setRegAvatar] = useState<string>(ASSETS.headerAvatar);
   const [acceptTerms, setAcceptTerms] = useState<boolean>(true);
 
+  const [storedAccounts, setStoredAccounts] = useState<StoredAccountRecord[]>(() => {
+    try {
+      return getStoredAccounts();
+    } catch {
+      return [];
+    }
+  });
+
   // UI & Feedback states
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [showForgotPassword, setShowForgotPassword] = useState<boolean>(false);
   const [showItHelp, setShowItHelp] = useState<boolean>(false);
+  const [showSyncModal, setShowSyncModal] = useState<boolean>(false);
+  const [importJsonText, setImportJsonText] = useState<string>('');
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [resetEmail, setResetEmail] = useState<string>('');
   const [resetSent, setResetSent] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      setStoredAccounts(getStoredAccounts());
+      // Silent background sync from Firestore
+      syncAccountsFromCloud().then((res) => {
+        if (res.success && res.count > 0) {
+          setStoredAccounts(getStoredAccounts());
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }, [authMode]);
+
+  const handleCloudSync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await syncAccountsFromCloud();
+      setIsSyncingCloud(false);
+      if (res.success) {
+        setStoredAccounts(getStoredAccounts());
+        showToast(`ซิงค์บัญชีจาก Cloud สำเร็จ (${res.count} บัญชี)`, 'success');
+      } else {
+        showToast(res.error || 'ไม่สามารถเชื่อมต่อ Cloud ได้', 'error');
+      }
+    } catch {
+      setIsSyncingCloud(false);
+      showToast('เกิดข้อผิดพลาดในการซิงค์', 'error');
+    }
+  };
+
+  const handleResetToDemo = () => {
+    const demos = getDefaultSeedAccounts();
+    localStorage.setItem('sn_registered_accounts', JSON.stringify(demos));
+    setStoredAccounts(demos);
+    showToast('รีเซ็ตรายการเป็นบัญชีตัวอย่างมาตรฐานเรียบร้อยแล้ว', 'success');
+  };
+
+  const handleImportAccounts = () => {
+    if (!importJsonText.trim()) {
+      showToast('กรุณาวางข้อมูล JSON ของบัญชี', 'error');
+      return;
+    }
+    const res = importAccountsData(importJsonText);
+    if (res.success) {
+      setStoredAccounts(getStoredAccounts());
+      setImportJsonText('');
+      setShowSyncModal(false);
+      showToast(`นำเข้าสำเร็จ ${res.count} บัญชี`, 'success');
+    } else {
+      showToast(res.error || 'นำเข้าข้อมูลไม่สำเร็จ', 'error');
+    }
+  };
+
+  const handleExportAccounts = () => {
+    const dataStr = exportAccountsData();
+    navigator.clipboard.writeText(dataStr).then(() => {
+      showToast('คัดลอกรหัสข้อมูลบัญชีลงคลิปบอร์ดแล้ว', 'success');
+    }).catch(() => {
+      showToast('ไม่สามารถคัดลอกได้อัตโนมัติ', 'error');
+    });
+  };
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
@@ -115,11 +195,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     try {
       localStorage.setItem('sn_last_role', role);
       const savedForThisRole = localStorage.getItem(`sn_remembered_id_${role}`);
-      setIdentifier(savedForThisRole || '');
+      if (savedForThisRole) {
+        setIdentifier(savedForThisRole);
+      } else {
+        const acc = storedAccounts.find((a) => a.role === role);
+        if (acc) {
+          setIdentifier(acc.studentId || acc.email);
+        } else {
+          setIdentifier('');
+        }
+      }
       setPassword('');
     } catch {
       // ignore
     }
+  };
+
+  const handleSelectAccount = (acc: StoredAccountRecord) => {
+    setSelectedRole(acc.role);
+    setIdentifier(acc.studentId || acc.email || '');
+    if (acc.password) {
+      setPassword(acc.password);
+    }
+    showToast(`เลือกบัญชี ${acc.thaiName || acc.name} เรียบร้อยแล้ว`, 'success');
   };
 
   // Sign In Handler connected to Firebase
@@ -148,7 +246,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         } catch {
           // ignore
         }
-        showToast(`ยินดีต้อนรับ ${result.user.thaiName || result.user.name}`, 'success');
+        // If user is registered under a different role, automatically adjust and inform
+        if (result.user.role && result.user.role !== selectedRole) {
+          setSelectedRole(result.user.role);
+        }
         onLoginSuccess(result.user);
       } else {
         showToast(result.error || 'ไม่สามารถเข้าสู่ระบบได้ กรุณาตรวจสอบข้อมูล', 'error');
@@ -458,6 +559,79 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     สลับบัญชีอื่น ➔
                   </button>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Stored Accounts Quick Switcher on this Device */}
+        {authMode === 'signin' && !isAutoLocked && (
+          <div className="w-full mb-3.5 p-3 rounded-2xl bg-white/95 border border-blue-100 shadow-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px] text-[#1550d3]">cloud_sync</span>
+                <span>บัญชีพร้อมใช้งานในระบบ ({storedAccounts.length})</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCloudSync}
+                  disabled={isSyncingCloud}
+                  className="text-[10px] text-[#1550d3] hover:text-[#1242b3] font-bold cursor-pointer transition-colors flex items-center gap-0.5 bg-blue-50 px-2 py-0.5 rounded-lg hover:bg-blue-100"
+                >
+                  <span className={`material-symbols-outlined text-[12px] ${isSyncingCloud ? 'animate-spin' : ''}`}>sync</span>
+                  {isSyncingCloud ? 'กำลังซิงค์...' : 'ดึงจาก Cloud'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSyncModal(true)}
+                  className="text-[10px] text-slate-600 hover:text-slate-900 font-semibold cursor-pointer transition-colors flex items-center gap-0.5 bg-slate-100 px-2 py-0.5 rounded-lg hover:bg-slate-200"
+                >
+                  <span className="material-symbols-outlined text-[12px]">swap_horiz</span>
+                  โอนย้าย
+                </button>
+              </div>
+            </div>
+            {storedAccounts.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
+                {storedAccounts.map((acc) => {
+                  const isCurrent =
+                    (identifier && (identifier === acc.studentId || identifier === acc.email)) &&
+                    selectedRole === acc.role;
+                  return (
+                    <button
+                      key={acc.id || acc.studentId || acc.email}
+                      type="button"
+                      onClick={() => handleSelectAccount(acc)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                        isCurrent
+                          ? 'bg-blue-50 border-[#1550d3] text-[#1550d3] ring-1 ring-[#1550d3]/30 shadow-2xs font-bold'
+                          : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <img
+                        src={acc.user?.avatar || ASSETS.headerAvatar}
+                        alt={acc.thaiName || acc.name}
+                        className="w-5 h-5 rounded-full object-cover shrink-0 ring-1 ring-slate-200"
+                      />
+                      <span className="truncate max-w-[120px]">{acc.thaiName || acc.name}</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-200/80 text-slate-600 font-mono">
+                        {acc.studentId || acc.role}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between text-xs text-slate-500 py-1">
+                <span>ยังไม่มีบัญชีในเครื่อง</span>
+                <button
+                  type="button"
+                  onClick={handleResetToDemo}
+                  className="text-xs text-[#1550d3] font-bold hover:underline cursor-pointer"
+                >
+                  โหลดบัญชีตัวอย่างมาตรฐาน
+                </button>
               </div>
             )}
           </div>
@@ -1007,6 +1181,111 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             >
               ปิดหน้าต่าง
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Cloud Sync & Account Transfer Modal */}
+      {showSyncModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-100 animate-scaleIn">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-[#121b2e] flex items-center gap-2">
+                <span className="material-symbols-outlined text-[#1550d3]">swap_horizontal_circle</span>
+                โอนย้ายและซิงค์บัญชีผู้ใช้
+              </h3>
+              <button
+                onClick={() => setShowSyncModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+              เครื่องมือนี้ช่วยให้คุณย้ายบัญชีที่สร้างจาก Google AI Studio ไปยัง GitHub Pages หรืออุปกรณ์อื่นได้อย่างง่ายดาย
+            </p>
+
+            <div className="space-y-4">
+              {/* Option 1: One-Click Cloud Sync */}
+              <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-2xl">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="font-bold text-xs text-blue-900 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px] text-[#1550d3]">cloud_sync</span>
+                    1. ซิงค์จาก Cloud Firestore อัตโนมัติ
+                  </div>
+                  <button
+                    onClick={handleCloudSync}
+                    disabled={isSyncingCloud}
+                    className="px-3 py-1.5 bg-[#1550d3] text-white rounded-xl text-xs font-bold hover:bg-[#1242b3] cursor-pointer flex items-center gap-1"
+                  >
+                    <span className={`material-symbols-outlined text-[14px] ${isSyncingCloud ? 'animate-spin' : ''}`}>sync</span>
+                    {isSyncingCloud ? 'กำลังซิงค์...' : 'ซิงค์ทันที'}
+                  </button>
+                </div>
+                <div className="text-[11px] text-blue-700/80">
+                  ดึงข้อมูลบัญชีทั้งหมดที่บันทึกลงใน Firestore มายังเบราว์เซอร์นี้
+                </div>
+              </div>
+
+              {/* Option 2: Copy / Export */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px] text-emerald-600">content_copy</span>
+                    2. ส่งออกบัญชี (Export)
+                  </div>
+                  <button
+                    onClick={handleExportAccounts}
+                    className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 cursor-pointer flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">file_copy</span>
+                    คัดลอกข้อมูลบัญชี
+                  </button>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  คัดลอกรหัสบัญชีจากอุปกรณ์นี้ เพื่อนำไปวางในหน้า GitHub Pages
+                </div>
+              </div>
+
+              {/* Option 3: Paste / Import */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                <div className="font-bold text-xs text-slate-800 flex items-center gap-1.5 mb-1.5">
+                  <span className="material-symbols-outlined text-[18px] text-indigo-600">file_upload</span>
+                  3. นำเข้าบัญชี (Import JSON)
+                </div>
+                <textarea
+                  value={importJsonText}
+                  onChange={(e) => setImportJsonText(e.target.value)}
+                  placeholder="วางข้อมูล JSON บัญชีที่นี่..."
+                  rows={2}
+                  className="w-full p-2.5 text-xs bg-white border border-slate-200 rounded-xl font-mono text-slate-700 mb-2 focus:border-[#1550d3] focus:outline-none"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={handleResetToDemo}
+                    className="px-2.5 py-1 text-xs text-slate-600 hover:text-slate-800 cursor-pointer"
+                  >
+                    คืนค่าบัญชีมาตรฐาน
+                  </button>
+                  <button
+                    onClick={handleImportAccounts}
+                    className="px-3.5 py-1.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 cursor-pointer"
+                  >
+                    นำเข้าข้อมูล
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setShowSyncModal(false)}
+                className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 cursor-pointer"
+              >
+                ปิด
+              </button>
+            </div>
           </div>
         </div>
       )}
