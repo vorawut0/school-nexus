@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, RoomBooking } from '../../types';
 import { ASSETS } from '../../data/mockData';
-import { subscribeToAllUsers } from '../../services/firebaseService';
+import {
+  subscribeToAllUsers,
+  pushRealtimeNotification,
+  addSystemLogInFirestore,
+  getLocalCache,
+} from '../../services/firebaseService';
 
 interface AdminDashboardProps {
   user: UserProfile;
@@ -28,6 +33,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [iotStatus, setIotStatus] = useState<'normal' | 'optimized' | 'standby'>('normal');
 
+  // Broadcast Announcement State
+  const [showBroadcastModal, setShowBroadcastModal] = useState<boolean>(false);
+  const [broadcastTitle, setBroadcastTitle] = useState<string>('');
+  const [broadcastMessage, setBroadcastMessage] = useState<string>('');
+  const [broadcastTarget, setBroadcastTarget] = useState<'all' | 'students' | 'teachers' | 'parents'>('all');
+  const [isBroadcasting, setIsBroadcasting] = useState<boolean>(false);
+
   // Real-time user stats subscription
   useEffect(() => {
     const unsub = subscribeToAllUsers((users) => {
@@ -53,8 +65,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEmergencyLockdownActive(nextState);
     if (nextState) {
       showToast('⚠️ สั่งล็อกประตูดิจิทัลและเปิดสัญญาณเตือนความปลอดภัยทุกจุดทั่วแคมปัส');
+      addSystemLogInFirestore({
+        title: 'Emergency Lockdown Activated',
+        description: `ผู้ดูแลระบบ ${user.thaiName} สั่งการปิดล็อกฉุกเฉินทั่วโรงเรียน`,
+        category: 'security',
+        level: 'alert',
+        deviceOrGate: 'ALL-GATES-MASTER',
+      });
     } else {
       showToast('✅ ปลดล็อกระบบรักษาความปลอดภัย คืนสถานะการทำงานปกติทุกจุด');
+      addSystemLogInFirestore({
+        title: 'Emergency Lockdown Deactivated',
+        description: `ผู้ดูแลระบบ ${user.thaiName} ยกเลิกการล็อกฉุกเฉิน ระบบกลับสู่ปกติ`,
+        category: 'security',
+        level: 'info',
+        deviceOrGate: 'ALL-GATES-MASTER',
+      });
     }
   };
 
@@ -64,6 +90,97 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsRefreshing(false);
       showToast('🔄 ซิงค์สถานะ Cloud Firestore, ประตู RFID และโหนด IoT ทั้งหมดเรียบร้อย');
     }, 1000);
+  };
+
+  const handleExportBackupSnapshot = () => {
+    try {
+      const allUsers = getLocalCache<any[]>('nexus_all_users', []);
+      const assignments = getLocalCache<any[]>('assignments', []);
+      const roomBookings = getLocalCache<any[]>('roomBookings', []);
+      const notifications = getLocalCache<any[]>('notifications', []);
+
+      const backupData = {
+        app: 'School Nexus Comprehensive ERP',
+        backupTimestamp: new Date().toISOString(),
+        exportedBy: {
+          name: user.thaiName,
+          id: user.id,
+          role: user.role,
+        },
+        collections: {
+          users: allUsers,
+          assignments,
+          roomBookings,
+          notifications,
+          systemHealth: {
+            uptime: '99.98%',
+            iotNodes: 42,
+            rfidGates: 12,
+            activeMode: iotStatus,
+          },
+        },
+      };
+
+      const jsonStr = JSON.stringify(backupData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `SchoolNexus-Backup-Snapshot-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showToast('📥 ดาวน์โหลดไฟล์ Snapshot ฐานข้อมูล JSON สำเร็จเรียบร้อย');
+      addSystemLogInFirestore({
+        title: 'Database Backup Exported',
+        description: `ผู้ดูแลระบบ ${user.thaiName} ส่งออกไฟล์ Database Snapshot`,
+        category: 'system',
+        level: 'info',
+        deviceOrGate: 'CLOUD-FIRESTORE',
+      });
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ ไม่สามารถดาวน์โหลด Snapshot ได้');
+    }
+  };
+
+  const handleSendBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!broadcastTitle.trim() || !broadcastMessage.trim()) {
+      showToast('กรุณากรอกหัวข้อและข้อความประกาศ');
+      return;
+    }
+
+    setIsBroadcasting(true);
+    try {
+      await pushRealtimeNotification({
+        title: `📢 ${broadcastTitle.trim()}`,
+        message: broadcastMessage.trim(),
+        type: 'announcement',
+        role: broadcastTarget === 'all' ? 'all' : (broadcastTarget as any),
+        priority: 'high',
+        icon: 'campaign',
+      });
+
+      addSystemLogInFirestore({
+        title: `Broadcast Announcement: ${broadcastTitle}`,
+        description: `ส่งประกาศถึง ${broadcastTarget === 'all' ? 'ทุกคนในโรงเรียน' : broadcastTarget}`,
+        category: 'system',
+        level: 'info',
+        deviceOrGate: 'CENTRAL-BROADCAST',
+      });
+
+      setIsBroadcasting(false);
+      setShowBroadcastModal(false);
+      setBroadcastTitle('');
+      setBroadcastMessage('');
+      showToast('🚀 ส่งประกาศด่วนแบบเรียลไทม์ถึงผู้ใช้เป้าหมายเรียบร้อยแล้ว');
+    } catch (err) {
+      setIsBroadcasting(false);
+      showToast('เกิดข้อผิดพลาดในการกระจายข้อความ');
+    }
   };
 
   return (
@@ -111,6 +228,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* Quick Admin Actions */}
           <div className="flex items-center gap-2 flex-wrap relative z-10">
+            <button
+              onClick={() => setShowBroadcastModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">campaign</span>
+              <span>ส่งประกาศด่วน (Broadcast)</span>
+            </button>
+
             <button
               onClick={handleRefreshSystem}
               disabled={isRefreshing}
@@ -310,14 +435,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
 
                 <button
-                  onClick={() => showToast('สำรองข้อมูลฐานข้อมูล Firebase สำเร็จ (Firestore Snapshot 2026-08-19)')}
+                  onClick={handleExportBackupSnapshot}
                   className="p-3.5 rounded-2xl bg-slate-50 hover:bg-rose-50/80 border border-slate-200/80 hover:border-rose-300 text-left transition-all group cursor-pointer"
                 >
                   <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
                     <span className="material-symbols-outlined text-[20px]">cloud_download</span>
                   </div>
                   <div className="font-bold text-xs text-slate-900 group-hover:text-rose-700">สำรองฐานข้อมูล Snapshot</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">สำรองข้อมูล Real-time Cloud</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">ดาวน์โหลด JSON Real-time Backup</div>
                 </button>
               </div>
             </div>
@@ -475,6 +600,114 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
       </div>
+
+      {/* Broadcast Announcement Modal */}
+      {showBroadcastModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div
+            className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col animate-scaleUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-blue-900 to-indigo-900 text-white">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-2xl text-blue-300">campaign</span>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base sm:text-lg">กระจายประกาศด่วน (Live Broadcast)</h3>
+                  <p className="text-xs text-blue-200">ส่งแจ้งเตือนแบบ Real-time Push สู่ทุกคนในแอปพลิเคชัน</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBroadcastModal(false)}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSendBroadcast} className="p-5 flex flex-col gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">กลุ่มผู้รับเป้าหมาย</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'all', label: 'ทุกคนในระบบ', icon: 'groups' },
+                    { id: 'students', label: 'นักเรียน', icon: 'school' },
+                    { id: 'teachers', label: 'อาจารย์', icon: 'badge' },
+                    { id: 'parents', label: 'ผู้ปกครอง', icon: 'family_restroom' },
+                  ].map((target) => (
+                    <button
+                      key={target.id}
+                      type="button"
+                      onClick={() => setBroadcastTarget(target.id as any)}
+                      className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                        broadcastTarget === target.id
+                          ? 'bg-blue-50 border-blue-600 text-blue-900 shadow-2xs'
+                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[18px]">{target.icon}</span>
+                      <span className="text-[11px]">{target.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">หัวข้อประกาศด่วน *</label>
+                <input
+                  type="text"
+                  value={broadcastTitle}
+                  onChange={(e) => setBroadcastTitle(e.target.value)}
+                  placeholder="เช่น แจ้งกำหนดการกิจกรรมวันวิชาการ หรือ แจ้งเตือนเหตุด่วน"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">รายละเอียดข้อความ *</label>
+                <textarea
+                  value={broadcastMessage}
+                  onChange={(e) => setBroadcastMessage(e.target.value)}
+                  rows={4}
+                  placeholder="ระบุข้อความประกาศที่ต้องการส่งตรงถึงหน้าจอผู้ใช้..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 resize-none"
+                  required
+                />
+              </div>
+
+              <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-[11px] text-blue-900 flex items-start gap-2">
+                <span className="material-symbols-outlined text-[16px] text-blue-600 shrink-0 mt-0.5">info</span>
+                <span>ประกาศนี้จะถูกส่งขึ้นระบบ Cloud Firestore และแสดงเป็นแบนเนอร์แจ้งเตือนเด้งสดทันทีบนหน้าจอของผู้ใช้ทุกคน</span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowBroadcastModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={isBroadcasting || !broadcastTitle.trim() || !broadcastMessage.trim()}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                >
+                  <span className={`material-symbols-outlined text-base ${isBroadcasting ? 'animate-spin' : ''}`}>
+                    {isBroadcasting ? 'sync' : 'send'}
+                  </span>
+                  <span>{isBroadcasting ? 'กำลังส่งประกาศ...' : 'ส่งประกาศทันที'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

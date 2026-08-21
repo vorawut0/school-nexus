@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../../types';
+import { db } from '../../services/firebaseService';
+import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 
 interface AdminLogsViewProps {
   user: UserProfile;
@@ -13,6 +15,7 @@ interface SystemLog {
   title: string;
   description: string;
   deviceOrGate: string;
+  timestamp?: number;
 }
 
 const MOCK_LOGS: SystemLog[] = [
@@ -69,6 +72,43 @@ export const AdminLogsView: React.FC<AdminLogsViewProps> = ({ user }) => {
   const [isRunningDiagnostic, setIsRunningDiagnostic] = useState(false);
   const [diagnosticResult, setDiagnosticResult] = useState<string | null>(null);
 
+  // Subscribe to real-time Firestore system_logs if available
+  useEffect(() => {
+    try {
+      const q = query(collection(db, 'system_logs'), limit(30));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const fetchedLogs: SystemLog[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data() as any;
+            fetchedLogs.push({
+              id: doc.id,
+              time: data.time || new Date(data.timestamp || Date.now()).toLocaleTimeString('th-TH'),
+              category: data.category || 'system',
+              level: data.level || 'info',
+              title: data.title || 'เหตุการณ์ระบบ',
+              description: data.description || '',
+              deviceOrGate: data.deviceOrGate || 'CLOUD-SRV',
+              timestamp: data.timestamp,
+            });
+          });
+          if (fetchedLogs.length > 0) {
+            setLogs((prev) => {
+              const combined = [...fetchedLogs, ...prev];
+              const unique = Array.from(new Map(combined.map((item) => [item.id, item])).values());
+              return unique.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            });
+          }
+        }
+      }, () => {
+        // Fallback gracefully to mock data if offline or permission
+      });
+      return () => unsubscribe();
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const handleRunDiagnostic = () => {
     setIsRunningDiagnostic(true);
     setDiagnosticResult(null);
@@ -76,6 +116,34 @@ export const AdminLogsView: React.FC<AdminLogsViewProps> = ({ user }) => {
       setIsRunningDiagnostic(false);
       setDiagnosticResult('✅ ผลการทดสอบ: ระบบแม่ข่ายและเครือข่าย IoT 40 จุดทำงานปกติ 100% (Latency: 4ms, Uptime: 99.98%)');
     }, 1800);
+  };
+
+  const handleExportLogsCsv = () => {
+    try {
+      const headers = ['ID', 'Timestamp/Time', 'Category', 'Level', 'Title', 'Description', 'DeviceOrGate'];
+      const rows = filteredLogs.map((l) => [
+        l.id,
+        `"${l.time}"`,
+        l.category,
+        l.level,
+        `"${l.title.replace(/"/g, '""')}"`,
+        `"${l.description.replace(/"/g, '""')}"`,
+        l.deviceOrGate,
+      ]);
+
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `SchoolNexus-AuditLogs-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const filteredLogs = logs.filter((l) => {
@@ -103,16 +171,26 @@ export const AdminLogsView: React.FC<AdminLogsViewProps> = ({ user }) => {
             </p>
           </div>
 
-          <button
-            onClick={handleRunDiagnostic}
-            disabled={isRunningDiagnostic}
-            className="px-4 py-2.5 rounded-xl bg-[#1550d3] hover:bg-[#1a53d6] text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer shrink-0 disabled:opacity-50"
-          >
-            <span className={`material-symbols-outlined text-[18px] ${isRunningDiagnostic ? 'animate-spin' : ''}`}>
-              {isRunningDiagnostic ? 'progress_activity' : 'network_check'}
-            </span>
-            <span>{isRunningDiagnostic ? 'กำลังทดสอบเครือข่าย...' : 'รันระบบวินิจฉัยแคมปัส (Diagnostic)'}</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <button
+              onClick={handleExportLogsCsv}
+              className="px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-xs active:scale-95 transition-all cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px] text-emerald-600">download</span>
+              <span>ส่งออกบันทึก (CSV)</span>
+            </button>
+
+            <button
+              onClick={handleRunDiagnostic}
+              disabled={isRunningDiagnostic}
+              className="px-4 py-2.5 rounded-xl bg-[#1550d3] hover:bg-[#1a53d6] text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer shrink-0 disabled:opacity-50"
+            >
+              <span className={`material-symbols-outlined text-[18px] ${isRunningDiagnostic ? 'animate-spin' : ''}`}>
+                {isRunningDiagnostic ? 'progress_activity' : 'network_check'}
+              </span>
+              <span>{isRunningDiagnostic ? 'กำลังทดสอบเครือข่าย...' : 'รันระบบวินิจฉัยแคมปัส (Diagnostic)'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Diagnostic Result Banner */}

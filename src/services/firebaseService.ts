@@ -19,6 +19,7 @@ import {
   signInWithPopup,
 } from 'firebase/auth';
 import { db, auth, googleProvider, handleFirestoreError, OperationType } from '../firebase';
+export { db, auth, googleProvider };
 import { UserProfile, UserRole, RoomBooking, Assignment, NotificationItem } from '../types';
 import {
   INITIAL_USER,

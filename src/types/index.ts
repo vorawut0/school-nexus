@@ -256,7 +256,7 @@ export interface NotificationItem {
   title: string;
   message: string;
   time: string;
-  type: 'assignment' | 'class' | 'grade' | 'system' | 'security' | 'attendance' | 'iot' | 'payment';
+  type: 'assignment' | 'class' | 'grade' | 'system' | 'security' | 'attendance' | 'iot' | 'payment' | 'announcement';
   read: boolean;
   role?: UserRole | 'all';
   priority?: 'high' | 'normal' | 'urgent';
