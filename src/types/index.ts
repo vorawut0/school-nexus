@@ -208,6 +208,37 @@ export interface Assignment {
   lastCommitSha?: string;
   lastCommitMessage?: string;
   lastSyncedAt?: string;
+  rubricSpreadsheetId?: string;
+  rubricSpreadsheetUrl?: string;
+}
+
+export interface RubricLevel {
+  label: string;
+  score: number;
+  description: string;
+}
+
+export interface AssignmentRubricCriteria {
+  id: string;
+  name: string;
+  description: string;
+  weightPercent?: number;
+  maxScore: number;
+  levels?: RubricLevel[];
+}
+
+export interface AssignmentRubric {
+  id: string;
+  title: string;
+  subjectCode?: string;
+  subjectTitle?: string;
+  spreadsheetId?: string;
+  sheetName?: string;
+  spreadsheetUrl?: string;
+  totalMaxScore: number;
+  criteria: AssignmentRubricCriteria[];
+  generalInstructions?: string;
+  lastSyncedAt?: string;
 }
 
 export interface GithubCommitInfo {

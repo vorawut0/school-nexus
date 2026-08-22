@@ -770,7 +770,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#f9f9ff] text-[#121b2e] flex flex-col font-['Noto_Sans_Thai',sans-serif] selection:bg-[#1550d3] selection:text-white">
+    <div className="min-h-screen w-screen max-w-full overflow-x-hidden bg-[#f9f9ff] text-[#121b2e] flex flex-col font-['Noto_Sans_Thai',sans-serif] selection:bg-[#1550d3] selection:text-white">
       {/* Fixed Top Header */}
       <Header
         currentTab={currentTab}
@@ -790,10 +790,10 @@ export default function App() {
 
       {/* Offline Status Warning Bar */}
       {isOffline && (
-        <div className="bg-amber-500 text-slate-900 px-4 py-2 text-xs font-bold flex items-center justify-between shadow-xs sticky top-[56px] sm:top-[64px] z-30 animate-fadeIn">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px]">cloud_off</span>
-            <span>
+        <div className="bg-amber-500 text-slate-900 px-3 sm:px-4 py-2 text-xs font-bold flex items-center justify-between shadow-xs sticky top-[56px] sm:top-[64px] z-30 animate-fadeIn">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="material-symbols-outlined text-[18px] shrink-0">cloud_off</span>
+            <span className="truncate">
               โหมดออฟไลน์ (Offline Mode) • ใช้งานข้อมูลที่แคชไว้ในเครื่องได้ตามปกติ ข้อมูลที่บันทึกจะซิงค์ใหม่อัตโนมัติเมื่อออนไลน์
             </span>
           </div>
@@ -813,14 +813,14 @@ export default function App() {
 
       {/* Offline Toast Notification */}
       {offlineToast && (
-        <div className="fixed top-20 right-4 z-50 bg-[#121b2e] text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 flex items-center gap-3 text-xs font-semibold animate-slideDown max-w-sm">
-          <span className="material-symbols-outlined text-[#20C997] text-[20px]">
+        <div className="fixed top-16 sm:top-20 right-3 sm:right-4 z-50 bg-[#121b2e] text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 flex items-center gap-3 text-xs font-semibold animate-slideDown max-w-[calc(100vw-24px)] sm:max-w-sm">
+          <span className="material-symbols-outlined text-[#20C997] text-[20px] shrink-0">
             {isOffline ? 'cloud_off' : 'sync'}
           </span>
-          <span className="flex-1">{offlineToast}</span>
+          <span className="flex-1 truncate">{offlineToast}</span>
           <button
             onClick={() => setOfflineToast(null)}
-            className="text-slate-400 hover:text-white cursor-pointer"
+            className="text-slate-400 hover:text-white cursor-pointer shrink-0"
           >
             ✕
           </button>
@@ -837,7 +837,7 @@ export default function App() {
       />
 
       {/* Main View Router */}
-      <main className="flex-1 w-full flex flex-col">
+      <main className="flex-1 w-full max-w-full overflow-x-hidden flex flex-col px-0">
         {currentTab === 'dashboard' && (
           user.role === 'teacher' ? (
             <TeacherDashboard
