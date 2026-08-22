@@ -2189,13 +2189,14 @@ export async function resetAllSystemDataAndFactoryDefaults(): Promise<{
     // 5. Seed initial clean Welcome Notification
     const welcomeNotif: NotificationItem = {
       id: `notif-reset-${Date.now()}`,
-      title: '✨ ระบบ School Nexus รีเซ็ตพร้อมใช้งาน 100%',
-      message: 'ข้อมูลและค่าทุกระบบได้รับการเชื่อมโยงและปรับสถานะให้พร้อมเริ่มต้นการทำงานใหม่ทันที',
+      title: '✨ ระบบ School Nexus เชื่อมโยงพร้อมใช้งาน',
+      message: 'ข้อมูลและค่าทุกระบบได้รับการเชื่อมโยงและพร้อมทำงานแบบ Real-time ทันที',
       type: 'system',
-      timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+      time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: Date.now(),
       read: false,
       priority: 'high',
-      icon: 'restart_alt',
+      icon: 'sync',
       role: 'all',
     };
     try {

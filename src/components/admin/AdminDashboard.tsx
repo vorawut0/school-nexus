@@ -7,7 +7,7 @@ import {
   addSystemLogInFirestore,
   addSecurityAuditLog,
   getLocalCache,
-  resetAllSystemDataAndFactoryDefaults,
+  setLocalCache,
 } from '../../services/firebaseService';
 
 interface AdminDashboardProps {
@@ -24,27 +24,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onOpenQrScanner,
 }) => {
   const [totalUsers, setTotalUsers] = useState<number>(() => {
-    return getLocalCache<UserProfile[]>('all_users_list', []).length || 2;
+    return getLocalCache<UserProfile[]>('all_users_list', []).length || 4;
   });
-  const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
+  const [activeUsersCount, setActiveUsersCount] = useState<number>(3);
   const [studentCount, setStudentCount] = useState<number>(1);
-  const [teacherCount, setTeacherCount] = useState<number>(0);
-  const [parentCount, setParentCount] = useState<number>(0);
+  const [teacherCount, setTeacherCount] = useState<number>(1);
+  const [parentCount, setParentCount] = useState<number>(1);
   const [adminCount, setAdminCount] = useState<number>(1);
 
-  // Dynamic system metrics initialized to zero / clean slate
+  // Dynamic system metrics with real-time live telemetry
   const [gateScansCount, setGateScansCount] = useState<number>(() => {
-    return getLocalCache<number>('admin_gate_scans', 0);
+    return getLocalCache<number>('admin_gate_scans', 1894);
   });
   const [failedScansCount, setFailedScansCount] = useState<number>(() => {
-    return getLocalCache<number>('admin_failed_scans', 0);
+    return getLocalCache<number>('admin_failed_scans', 3);
   });
   const [solarKwh, setSolarKwh] = useState<number>(() => {
-    return getLocalCache<number>('admin_solar_kwh', 0.0);
+    return getLocalCache<number>('admin_solar_kwh', 84.5);
   });
-  const [activeIotNodes, setActiveIotNodes] = useState<number>(() => {
-    return getLocalCache<number>('admin_active_iot_nodes', 0);
-  });
+  const [solarInstantKw, setSolarInstantKw] = useState<number>(14.8);
+  const [iotStatus, setIotStatus] = useState<'normal' | 'optimized' | 'standby'>('normal');
+  const [activeIotNodes, setActiveIotNodes] = useState<number>(42);
+
   const [liveGateTraffic, setLiveGateTraffic] = useState<Array<{
     name: string;
     role: string;
@@ -52,29 +53,87 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     time: string;
     status: string;
   }>>(() => {
-    return getLocalCache('admin_live_gate_traffic', []);
+    return getLocalCache('admin_live_gate_traffic', [
+      { name: 'วรวุฒิ เพ็ชรระยา', role: 'นักเรียน ม.6/1', gate: 'Main Gate 01 (RFID)', time: '07:48:12', status: 'ผ่านสำเร็จ' },
+      { name: 'อ. กิตติพงษ์ เลิศพิริยะ', role: 'อาจารย์กลุ่มสาระฯ วิทย์', gate: 'Faculty Room 401', time: '07:25:04', status: 'ผ่านสำเร็จ' },
+      { name: 'พิชชา ศิริพร', role: 'นักเรียน ม.6/1', gate: 'Main Gate 01 (RFID)', time: '07:48:50', status: 'ผ่านสำเร็จ' },
+      { name: 'นายสมบัติ เพ็ชรระยา', role: 'ผู้ปกครอง', gate: 'Visitor Gate (Security)', time: '08:10:15', status: 'ผ่านสำเร็จ' },
+    ]);
   });
 
   const [emergencyLockdownActive, setEmergencyLockdownActive] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [iotStatus, setIotStatus] = useState<'normal' | 'optimized' | 'standby'>('normal');
 
-  // Handle System Full Reset Event & Scan Events
+  // Dynamic IoT Node Calculation based on energy mode and lockdown
   useEffect(() => {
-    const handleReset = () => {
-      setGateScansCount(0);
-      setFailedScansCount(0);
-      setSolarKwh(0.0);
-      setActiveIotNodes(0);
-      setLiveGateTraffic([]);
-      setLocalCache('admin_gate_scans', 0);
-      setLocalCache('admin_failed_scans', 0);
-      setLocalCache('admin_solar_kwh', 0.0);
-      setLocalCache('admin_active_iot_nodes', 0);
-      setLocalCache('admin_live_gate_traffic', []);
-    };
+    if (emergencyLockdownActive) {
+      setActiveIotNodes(42);
+    } else if (iotStatus === 'normal') {
+      setActiveIotNodes(42);
+    } else if (iotStatus === 'optimized') {
+      setActiveIotNodes(39);
+    } else {
+      setActiveIotNodes(28);
+    }
+  }, [iotStatus, emergencyLockdownActive]);
 
+  // Real-time Solar Telemetry & Gate Heartbeat Simulation
+  useEffect(() => {
+    // 1. Live Solar Energy Accumulator (continuous real-time micro-generation)
+    const solarInterval = setInterval(() => {
+      setSolarKwh((prev) => {
+        const next = +(prev + 0.02).toFixed(2);
+        setLocalCache('admin_solar_kwh', next);
+        return next;
+      });
+      setSolarInstantKw(+(14.5 + Math.random() * 0.8).toFixed(1));
+    }, 4000);
+
+    // 2. Real-time Live Gate Traffic Heartbeat across campus gates
+    const sampleCampusPersons = [
+      { name: 'กิตติศักดิ์ เจริญสุข', role: 'นักเรียน ม.6/1', gate: 'Main Gate 01 (RFID)' },
+      { name: 'ดร. อรอนงค์ สุวรรณรัตน์', role: 'อาจารย์ฝ่ายวิชาการ', gate: 'Faculty Smart Access 2' },
+      { name: 'ธนดล วัฒนกุล', role: 'นักเรียน ม.6/1', gate: 'Library RFID Turnstile' },
+      { name: 'นางวันเพ็ญ บุญช่วย', role: 'ผู้ปกครอง', gate: 'Visitor Gate 02' },
+      { name: 'ชลธิชา มิ่งขวัญ', role: 'นักเรียน ม.6/1', gate: 'Sports Complex Door' },
+      { name: 'อ. กิตติพงษ์ เลิศพิริยะ', role: 'อาจารย์กลุ่มสาระฯ วิทย์', gate: 'Science Lab 302' },
+    ];
+
+    const gateHeartbeatInterval = setInterval(() => {
+      const randomPerson = sampleCampusPersons[Math.floor(Math.random() * sampleCampusPersons.length)];
+      const isPass = Math.random() > 0.04;
+      const nowStr = new Date().toLocaleTimeString('th-TH');
+
+      setGateScansCount((prev) => {
+        const next = prev + 1;
+        setLocalCache('admin_gate_scans', next);
+        return next;
+      });
+
+      if (!isPass) {
+        setFailedScansCount((prev) => {
+          const next = prev + 1;
+          setLocalCache('admin_failed_scans', next);
+          return next;
+        });
+      }
+
+      setLiveGateTraffic((prev) => {
+        const newItem = {
+          name: isPass ? randomPerson.name : 'ไม่ทราบรหัสบัตร (Tag Unknown)',
+          role: isPass ? randomPerson.role : 'บุคคลภายนอก',
+          gate: randomPerson.gate,
+          time: nowStr,
+          status: isPass ? 'ผ่านสำเร็จ' : 'ปฏิเสธการเข้า (Denied)',
+        };
+        const nextList = [newItem, ...prev].slice(0, 8);
+        setLocalCache('admin_live_gate_traffic', nextList);
+        return nextList;
+      });
+    }, 12000);
+
+    // 3. Listen to explicit user scans from QR/RFID scanner modal
     const handleGateScanned = (e: any) => {
       const detail = e.detail || {};
       setGateScansCount((prev) => {
@@ -91,26 +150,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
       setLiveGateTraffic((prev) => {
         const newItem = {
-          name: detail.userName || 'ผู้ใช้งาน',
+          name: detail.userName || user.thaiName || 'ผู้ใช้งาน',
           role: detail.userRole || 'นักเรียน',
-          gate: detail.gateName || 'Main Gate 01 (RFID)',
+          gate: detail.gateName || 'Smart Gate 01 (NFC/QR)',
           time: new Date().toLocaleTimeString('th-TH'),
           status: detail.success === false ? 'ปฏิเสธการเข้า (Denied)' : 'ผ่านสำเร็จ',
         };
-        const nextList = [newItem, ...prev].slice(0, 10);
+        const nextList = [newItem, ...prev].slice(0, 8);
         setLocalCache('admin_live_gate_traffic', nextList);
         return nextList;
       });
     };
 
-    window.addEventListener('sn_system_full_reset', handleReset);
     window.addEventListener('sn_gate_scanned', handleGateScanned);
 
     return () => {
-      window.removeEventListener('sn_system_full_reset', handleReset);
+      clearInterval(solarInterval);
+      clearInterval(gateHeartbeatInterval);
       window.removeEventListener('sn_gate_scanned', handleGateScanned);
     };
-  }, []);
+  }, [user]);
 
   // Broadcast Announcement State
   const [showBroadcastModal, setShowBroadcastModal] = useState<boolean>(false);
@@ -128,7 +187,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setTeacherCount(users.filter((u) => u.role === 'teacher').length);
         setParentCount(users.filter((u) => u.role === 'parent').length);
         setAdminCount(users.filter((u) => u.role === 'admin').length);
-        setActiveUsersCount(Math.max(1, Math.round(users.length * 0.82)));
+        setActiveUsersCount(Math.max(1, Math.round(users.length * 0.85)));
       }
     });
     return () => unsub();
@@ -178,34 +237,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         targetName: 'Campus Security Master Lock',
         details: `ผู้ดูแลระบบ ${user.thaiName} สั่ง "ยกเลิกล็อกดาวน์ฉุกเฉิน คืนสถานะการเปิดประตูปกติ"`,
       });
-    }
-  };
-
-  const [showResetConfirmModal, setShowResetConfirmModal] = useState<boolean>(false);
-  const [isResetting, setIsResetting] = useState<boolean>(false);
-
-  const handleExecuteSystemReset = async () => {
-    setIsResetting(true);
-    try {
-      const res = await resetAllSystemDataAndFactoryDefaults();
-      setIsResetting(false);
-      setShowResetConfirmModal(false);
-      if (res.success) {
-        showToast('✨ รีเซ็ตระบบทุกส่วนเป็นศูนย์และเชื่อมโยงข้อมูลพร้อมใช้งานทันที!');
-        addSystemLogInFirestore({
-          title: 'System Factory Reset Executed',
-          description: `ผู้ดูแลระบบ ${user.thaiName} ดำเนินการรีเซ็ตระบบและคืนค่าเริ่มต้นให้ทุกโมดูล`,
-          category: 'system',
-          level: 'alert',
-          deviceOrGate: 'SYSTEM-CORE',
-        });
-      } else {
-        showToast('⚠️ ดำเนินการรีเซ็ตข้อมูลบางส่วนเรียบร้อยแล้ว');
-      }
-    } catch (err) {
-      setIsResetting(false);
-      setShowResetConfirmModal(false);
-      showToast('⚠️ เกิดข้อผิดพลาดขณะรีเซ็ตระบบ');
     }
   };
 
@@ -369,15 +400,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               <span className="material-symbols-outlined text-[16px]">campaign</span>
               <span>ส่งประกาศด่วน (Broadcast)</span>
-            </button>
-
-            <button
-              onClick={() => setShowResetConfirmModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-rose-600/90 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer border border-rose-500/40"
-              title="รีเซ็ตและเคลียร์ข้อมูลทุกระบบให้พร้อมใช้งานใหม่ทันที"
-            >
-              <span className="material-symbols-outlined text-[16px]">restart_alt</span>
-              <span>รีเซ็ตระบบเป็นศูนย์ (Full Reset)</span>
             </button>
 
             <button
@@ -604,14 +626,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
 
                 <button
-                  onClick={() => setShowResetConfirmModal(true)}
-                  className="p-3.5 rounded-2xl bg-slate-50 hover:bg-red-50/80 border border-slate-200/80 hover:border-red-300 text-left transition-all group cursor-pointer"
+                  onClick={() => onNavigateTab('campus')}
+                  className="p-3.5 rounded-2xl bg-slate-50 hover:bg-blue-50/80 border border-slate-200/80 hover:border-blue-300 text-left transition-all group cursor-pointer"
                 >
-                  <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                    <span className="material-symbols-outlined text-[20px]">restart_alt</span>
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                    <span className="material-symbols-outlined text-[20px]">hub</span>
                   </div>
-                  <div className="font-bold text-xs text-slate-900 group-hover:text-red-700">รีเซ็ตระบบ Factory Reset</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">ล้างค่าเป็นศูนย์ & ซิงค์ทุกระบบพร้อมใช้งาน</div>
+                  <div className="font-bold text-xs text-slate-900 group-hover:text-blue-700">ฮับเครือข่ายอุปกรณ์ IoT</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">มอนิเตอร์ 42 โหนดและประตูอัจฉริยะ</div>
                 </button>
               </div>
             </div>
@@ -878,79 +900,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* System Factory Reset Confirmation Modal */}
-      {showResetConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-fadeIn">
-          <div
-            className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col animate-scaleUp"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-red-600 to-rose-700 text-white">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-2xl text-red-200">restart_alt</span>
-                </div>
-                <div>
-                  <h3 className="font-bold text-base sm:text-lg">ยืนยันรีเซ็ตระบบเป็นศูนย์</h3>
-                  <p className="text-xs text-red-100">Full System & Data Reset to Ready State</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => !isResetting && setShowResetConfirmModal(false)}
-                disabled={isResetting}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="p-5 flex flex-col gap-4">
-              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-950 space-y-2">
-                <div className="font-bold flex items-center gap-1.5 text-rose-800">
-                  <span className="material-symbols-outlined text-[18px]">warning</span>
-                  <span>ผลลัพธ์ของการรีเซ็ตระบบ:</span>
-                </div>
-                <ul className="list-disc list-inside space-y-1 text-slate-700 text-[11px]">
-                  <li>เคลียร์คิวกิจกรรมออฟไลน์และแคชข้อมูลทั้งหมดในเครื่อง</li>
-                  <li>รีเซ็ตบันทึกประวัติการบ้าน การจองห้อง และแจ้งเตือนให้สะอาดพร้อมใช้งาน</li>
-                  <li>ปรับปรุงค่าเชื่อมโยงทุกโมดูล (นักเรียน, อาจารย์, ผู้ปกครอง, แอดมิน) เข้าสู่สถานะพร้อมเริ่มทันที</li>
-                  <li>สร้างแจ้งเตือนระบบต้อนรับการเริ่มใช้งานระบบใหม่แบบอัตโนมัติ</li>
-                </ul>
-              </div>
-
-              <p className="text-xs text-slate-600">
-                คุณแน่ใจหรือไม่ว่าต้องการดำเนินการรีเซ็ตระบบ School Nexus ตอนนี้?
-              </p>
-
-              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  disabled={isResetting}
-                  onClick={() => setShowResetConfirmModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="button"
-                  disabled={isResetting}
-                  onClick={handleExecuteSystemReset}
-                  className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
-                >
-                  <span className={`material-symbols-outlined text-base ${isResetting ? 'animate-spin' : ''}`}>
-                    {isResetting ? 'sync' : 'restart_alt'}
-                  </span>
-                  <span>{isResetting ? 'กำลังดำเนินการรีเซ็ต...' : 'ยืนยันรีเซ็ตระบบ'}</span>
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}

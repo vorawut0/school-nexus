@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ASSETS, DEMO_PRESET_USERS } from '../data/mockData';
 import { UserProfile, UserRole } from '../types';
+import { SyncStatus } from './SyncStatus';
 import {
   CARD_THEMES,
   GuillochePatternSvg,
@@ -149,6 +150,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   />
                   <span>{isOffline ? 'ออฟไลน์ (Offline)' : 'ออนไลน์ (Online)'}</span>
                 </span>
+
+                <SyncStatus isOffline={isOffline} />
               </div>
 
               <h2 className="text-xl sm:text-2xl font-bold text-[#121b2e] leading-tight">

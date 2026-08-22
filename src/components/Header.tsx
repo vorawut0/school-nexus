@@ -1,7 +1,6 @@
 import React from 'react';
 import { ASSETS } from '../data/mockData';
 import { UserProfile } from '../types';
-import { SyncStatus } from './SyncStatus';
 
 interface HeaderProps {
   currentTab?: string;
@@ -23,9 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSearch,
   onOpenNotifications,
   onOpenProfile,
-  onOpenAITutor,
   onOpenInstallApp,
-  onSyncComplete,
 }) => {
   return (
     <header className="sticky top-0 inset-x-0 z-50 w-full bg-white/95 backdrop-blur-xl border-b border-[#e8ecf3] shadow-xs">
@@ -74,51 +71,6 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {/* AI Assistant Quick Access Button per Role */}
-          {onOpenAITutor && (
-            <button
-              onClick={onOpenAITutor}
-              className={`p-1.5 sm:px-3 sm:py-1.5 rounded-xl border flex items-center gap-1.5 text-[12px] sm:text-[13px] font-bold active:scale-95 transition-all shadow-2xs group cursor-pointer shrink-0 ${
-                user.role === 'teacher'
-                  ? 'bg-blue-50/80 hover:bg-blue-100/80 text-blue-700 border-blue-200/80'
-                  : user.role === 'admin'
-                  ? 'bg-purple-50/80 hover:bg-purple-100/80 text-purple-700 border-purple-200/80'
-                  : user.role === 'parent'
-                  ? 'bg-amber-50/80 hover:bg-amber-100/80 text-amber-700 border-amber-200/80'
-                  : 'bg-gradient-to-r from-[#1550d3]/10 to-[#7857f8]/10 hover:from-[#1550d3]/20 hover:to-[#7857f8]/20 text-[#1550d3] border-[#1550d3]/20'
-              }`}
-              title={
-                user.role === 'teacher'
-                  ? 'เปิด AI Teaching Assistant (ผู้ช่วยการสอน)'
-                  : user.role === 'admin'
-                  ? 'เปิด AI Ops Assistant (ผู้ช่วยระบบ)'
-                  : user.role === 'parent'
-                  ? 'เปิด AI Family Guide (ที่ปรึกษาครอบครัว)'
-                  : 'เปิด AI Tutor (ผู้ช่วยติวเตอร์)'
-              }
-              aria-label="AI Assistant"
-            >
-              <span className="material-symbols-outlined text-[17px] sm:text-[18px] group-hover:scale-110 transition-transform">
-                {user.role === 'teacher'
-                  ? 'menu_book'
-                  : user.role === 'admin'
-                  ? 'security'
-                  : user.role === 'parent'
-                  ? 'family_restroom'
-                  : 'auto_awesome'}
-              </span>
-              <span className="hidden md:inline whitespace-nowrap">
-                {user.role === 'teacher'
-                  ? 'ผู้ช่วยสอน AI'
-                  : user.role === 'admin'
-                  ? 'ดูแลระบบ AI'
-                  : user.role === 'parent'
-                  ? 'ดูแลครอบครัว AI'
-                  : 'ติวเตอร์ AI'}
-              </span>
-            </button>
-          )}
-
           {onOpenInstallApp && (
             <button
               onClick={onOpenInstallApp}
@@ -131,12 +83,9 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Real-time Firestore Sync Status Indicator & Trigger */}
-          <SyncStatus isOffline={isOffline} onSyncComplete={onSyncComplete} />
-
           <button
             onClick={onOpenSearch}
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-[#434654] hover:text-[#1550d3] hover:bg-[#1550d3]/5 active:scale-95 transition-all shrink-0"
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-[#434654] hover:text-[#1550d3] hover:bg-[#1550d3]/5 active:scale-95 transition-all shrink-0 cursor-pointer"
             title="ค้นหา"
             aria-label="Search"
           >
@@ -145,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onOpenNotifications}
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-[#434654] hover:text-[#1550d3] hover:bg-[#1550d3]/5 active:scale-95 transition-all relative shrink-0"
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-[#434654] hover:text-[#1550d3] hover:bg-[#1550d3]/5 active:scale-95 transition-all relative shrink-0 cursor-pointer"
             title="การแจ้งเตือน"
             aria-label="Notifications"
           >
@@ -157,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onOpenProfile}
-            className="relative ml-0.5 active:scale-95 transition-transform group shrink-0"
+            className="relative ml-0.5 active:scale-95 transition-transform group shrink-0 cursor-pointer"
             title={isOffline ? "สถานะ: ออฟไลน์ (Offline)" : "สถานะ: ออนไลน์ (Online)"}
             aria-label="Profile"
           >
