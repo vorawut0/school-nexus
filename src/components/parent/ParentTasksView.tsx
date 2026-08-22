@@ -49,7 +49,7 @@ export const ParentTasksView: React.FC<ParentTasksViewProps> = ({ user, assignme
                 โหมดติดตามสำหรับผู้ปกครอง (Parent Monitor)
               </span>
               <span className="text-xs text-[#737686]">
-                นักเรียนในความดูแล: {user.childName || 'วรวุฒิ เพ็ชรระยา'} (ม.6/1)
+                นักเรียนในความดูแล: {user.childName || 'วรวุฒิ เพ็ชรราย'} (ม.6/1)
               </span>
             </div>
             <h1 className="text-[26px] sm:text-[32px] font-bold text-[#121b2e] leading-tight">

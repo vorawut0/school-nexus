@@ -14,7 +14,7 @@ export const ASSETS = {
 export const INITIAL_USER: UserProfile = {
   id: 'sn-usr-01',
   name: 'WORAWUT PETCHRAYA',
-  thaiName: 'วรวุฒิ เพ็ชรระยา',
+  thaiName: 'วรวุฒิ เพ็ชรราย',
   studentId: '66040217',
   email: 'worawut.p@schoolnexus.ac.th',
   role: 'student',
@@ -1915,7 +1915,7 @@ export const INITIAL_ROOM_BOOKINGS: RoomBooking[] = [
     passCode: 'NX-4028',
     qrValue: 'SN-BOOK-CS402-NX4028-20260818',
     bookedAt: '17 ส.ค. 2026, 19:30 น.',
-    bookedBy: 'วรวุฒิ เพ็ชรระยา',
+    bookedBy: 'วรวุฒิ เพ็ชรราย',
     unlocked: false
   },
   {
@@ -1937,7 +1937,7 @@ export const INITIAL_ROOM_BOOKINGS: RoomBooking[] = [
     passCode: 'NX-7129',
     qrValue: 'SN-BOOK-LIB-NX7129-20260819',
     bookedAt: '18 ส.ค. 2026, 08:15 น.',
-    bookedBy: 'วรวุฒิ เพ็ชรระยา',
+    bookedBy: 'วรวุฒิ เพ็ชรราย',
     unlocked: false
   }
 ];
@@ -2065,7 +2065,7 @@ export const DEMO_PRESET_USERS: { [key: string]: UserProfile } = {
   student: {
     id: 'sn-std-01',
     name: 'WORAWUT PETCHRAYA',
-    thaiName: 'วรวุฒิ เพ็ชรระยา',
+    thaiName: 'วรวุฒิ เพ็ชรราย',
     studentId: '66040217',
     email: 'worawut.p@schoolnexus.ac.th',
     role: 'student',
@@ -2112,13 +2112,13 @@ export const DEMO_PRESET_USERS: { [key: string]: UserProfile } = {
   parent: {
     id: 'sn-par-01',
     name: 'PARENT PETCHRAYA',
-    thaiName: 'นายสมบัติ เพ็ชรระยา',
+    thaiName: 'นายสมบัติ เพ็ชรราย',
     studentId: 'P-66040217',
     email: 'sombat.p@gmail.com',
     role: 'parent',
     avatar: ASSETS.cardAvatar,
     streakDays: 14,
-    childName: 'วรวุฒิ เพ็ชรระยา (ม.6/1)',
+    childName: 'วรวุฒิ เพ็ชรราย (ม.6/1)',
     position: 'ผู้ปกครองนักเรียน',
     department: 'สมาคมผู้ปกครองและครู',
     dutyStatus: 'ยืนยันตัวตนแล้ว (Verified)',

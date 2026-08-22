@@ -351,7 +351,7 @@ export const AITutorSidebar: React.FC<AITutorSidebarProps> = ({
             <div className="flex items-center justify-between bg-white/80 p-2 rounded-xl border border-amber-100 text-xs text-slate-700">
               <span className="flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-amber-600 text-[16px]">child_care</span>
-                <span>นักเรียนในความดูแล: <strong>วรวุฒิ เพ็ชรระยา (ม.6/1)</strong></span>
+                <span>นักเรียนในความดูแล: <strong>วรวุฒิ เพ็ชรราย (ม.6/1)</strong></span>
               </span>
               <span className="font-mono text-emerald-700 font-bold text-[11px]">มาเรียน 98.2%</span>
             </div>
@@ -751,7 +751,7 @@ function getRoleAIConfig(role: UserRole, user: UserProfile) {
         welcomeMessage: `### 👨‍👩‍👦 สวัสดีครับคุณ ${firstName}!
 ผมคือ **Nexus AI Family Guide** ผู้ช่วยดูแลและติดตามพัฒนาการของบุตรหลาน
 
-ผมเชื่อมต่อกับข้อมูลของ **วรวุฒิ เพ็ชรระยา (ม.6/1)**:
+ผมเชื่อมต่อกับข้อมูลของ **วรวุฒิ เพ็ชรราย (ม.6/1)**:
 1. 📊 **สรุปพัฒนาการการเรียน, การเข้าเรียน (98.2%) และการบ้านที่ค้างส่ง**
 2. 💬 **ให้คำแนะนำเชิงบวกในการส่งเสริมการเรียนรู้และการพูดคุยที่บ้าน**
 3. 🥗 **สรุปการใช้จ่ายบัตร Smart Canteen และคำแนะนำด้านโภชนาการ**
@@ -771,7 +771,7 @@ function getRoleAIConfig(role: UserRole, user: UserProfile) {
           student_progress: [
             {
               label: '📊 สรุปภาพรวมการเรียนและการเข้าเรียนสัปดาห์นี้',
-              prompt: 'ช่วยสรุปรายงานการเข้าเรียน ผลการส่งงาน และภาพรวมวิชาการของ วรวุฒิ เพ็ชรระยา ในสัปดาห์นี้',
+              prompt: 'ช่วยสรุปรายงานการเข้าเรียน ผลการส่งงาน และภาพรวมวิชาการของ วรวุฒิ เพ็ชรราย ในสัปดาห์นี้',
             },
             {
               label: '⏰ ประวัติการสแกนเข้าโรงเรียนย้อนหลัง 5 วัน',
@@ -1046,7 +1046,7 @@ function generateRoleSpecificFallback(
 - **การประเมินโภชนาการ:** สารอาหารครบ 5 หมู่ ได้รับโปรตีน ผัก และผลไม้สดอย่างเหมาะสม แนะนำเติมเงินเพิ่มสัปดาห์ละ 500 บาทครับ`;
     }
 
-    return `### 📊 รายงานพัฒนาการ: วรวุฒิ เพ็ชรระยา (ม.6/1)
+    return `### 📊 รายงานพัฒนาการ: วรวุฒิ เพ็ชรราย (ม.6/1)
 - **การเข้าเรียน:** อัตราการมาเรียน **98.2%** (ตรงเวลาสม่ำเสมอ เข้าเรียนเฉลี่ย 07:42 น.)
 - **ผลการเรียนปัจจุบัน:** GPA สะสม **3.92** (อยู่ในกลุ่มหัวแถวของสายวิทย์-คอมพ์)
 - **ภาระงานและการบ้าน:**

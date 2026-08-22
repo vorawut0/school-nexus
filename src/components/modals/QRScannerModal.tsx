@@ -1465,7 +1465,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                     <div className="col-span-2">
                       <span className="text-[10px] text-slate-400 block">นักเรียนในความดูแล</span>
                       <span className="font-semibold text-slate-200">
-                        {scannedProfile.childName || 'วรวุฒิ เพ็ชรระยา (ม.6/1)'}
+                        {scannedProfile.childName || 'วรวุฒิ เพ็ชรราย (ม.6/1)'}
                       </span>
                     </div>
                     <div>

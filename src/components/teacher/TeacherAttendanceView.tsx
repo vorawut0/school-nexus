@@ -24,7 +24,7 @@ const DEFAULT_CLASS_STUDENTS: StudentAttendanceRecord[] = [
     id: 'std-1',
     studentId: '66041001',
     name: 'Vorawut Phetrai',
-    thaiName: 'วรวุฒิ เพ็ชรระยา',
+    thaiName: 'วรวุฒิ เพ็ชรราย',
     avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=300',
     status: 'present',
     checkInTime: '08:24 น.',

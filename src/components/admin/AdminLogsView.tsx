@@ -25,7 +25,7 @@ const MOCK_LOGS: SystemLog[] = [
     category: 'access',
     level: 'info',
     title: 'แตะบัตรผ่านประตูอัตโนมัติสำเร็จ',
-    description: 'นักเรียน วรวุฒิ เพ็ชรระยา (66040217) แตะบัตร NFC เข้า Main Gate 01',
+    description: 'นักเรียน วรวุฒิ เพ็ชรราย (66040217) แตะบัตร NFC เข้า Main Gate 01',
     deviceOrGate: 'RFID-GATE-01'
   },
   {

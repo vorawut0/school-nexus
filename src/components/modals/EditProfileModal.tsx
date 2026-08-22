@@ -242,7 +242,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     required
                     value={formData.thaiName}
                     onChange={(e) => handleInputChange('thaiName', e.target.value)}
-                    placeholder="เช่น วรวุฒิ เพ็ชรระยา"
+                    placeholder="เช่น วรวุฒิ เพ็ชรราย"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-sm font-semibold text-slate-800 focus:bg-white focus:border-[#1550d3] focus:ring-2 focus:ring-[#1550d3]/20 outline-none transition-all"
                   />
                 </div>
@@ -373,7 +373,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     type="text"
                     value={formData.childName || ''}
                     onChange={(e) => handleInputChange('childName', e.target.value)}
-                    placeholder="เช่น วรวุฒิ เพ็ชรระยา (ม.6/1)"
+                    placeholder="เช่น วรวุฒิ เพ็ชรราย (ม.6/1)"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-sm font-semibold text-slate-800 focus:bg-white focus:border-[#1550d3] outline-none"
                   />
                 </div>

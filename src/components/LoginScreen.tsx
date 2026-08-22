@@ -681,7 +681,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     ? 'เช่น อ.ดร.กานต์ดา มุ่งมั่น'
                     : selectedRole === 'admin'
                     ? 'เช่น นายสมเกียรติ สิทธิคุณ (ผู้ดูแลระบบ)'
-                    : 'เช่น นายวรเทพ เพ็ชรระยา (ผู้ปกครอง)'
+                    : 'เช่น นายวรเทพ เพ็ชรราย (ผู้ปกครอง)'
                 }
                 className="w-full bg-white text-[#121b2e] placeholder:text-[#737686] text-[13px] rounded-xl py-2.5 px-3.5 shadow-xs border border-slate-200 focus:border-[#1550d3] focus:outline-none"
                 required
@@ -816,7 +816,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   type="text"
                   value={regChildName}
                   onChange={(e) => setRegChildName(e.target.value)}
-                  placeholder="เช่น 66040217 หรือ วรวุฒิ เพ็ชรระยา"
+                  placeholder="เช่น 66040217 หรือ วรวุฒิ เพ็ชรราย"
                   className="w-full bg-white text-[#121b2e] text-[13px] rounded-xl py-2.5 px-3.5 shadow-xs border border-slate-200 focus:border-[#1550d3] focus:outline-none"
                 />
               </div>

@@ -306,7 +306,7 @@ export const DigitalIdModal: React.FC<DigitalIdModalProps> = ({
                     {user.role === 'student' && (user.grade || 'ม.6/1')}
                     {user.role === 'teacher' && (user.position || 'อาจารย์ชำนาญการพิเศษ')}
                     {user.role === 'admin' && (user.position || 'ผู้ดูแลระบบไอทีและเครือข่าย')}
-                    {user.role === 'parent' && (user.childName || 'วรวุฒิ เพ็ชรระยา')}
+                    {user.role === 'parent' && (user.childName || 'วรวุฒิ เพ็ชรราย')}
                   </span>
                 </div>
 
@@ -448,7 +448,7 @@ export const DigitalIdModal: React.FC<DigitalIdModalProps> = ({
                       <div className="flex justify-between">
                         <span className="text-white/50">นักเรียนในความดูแล:</span>
                         <span className="font-bold text-white truncate max-w-[130px]">
-                          {user.childName || 'วรวุฒิ เพ็ชรระยา'}
+                          {user.childName || 'วรวุฒิ เพ็ชรราย'}
                         </span>
                       </div>
                       <div className="flex justify-between">

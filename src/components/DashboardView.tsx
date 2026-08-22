@@ -121,7 +121,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
       } else if (user.role === 'parent') {
         if (q.includes('เข้าเรียน') || q.includes('เวลา') || q.includes('มาโรงเรียน')) {
-          response = '⏰ วรวุฒิ เพ็ชรระยา สแกนเข้าประตูหน้า 1 เมื่อเวลา 07:42 น. (ตรงเวลา) อุณหภูมิปกติ 36.5°C ครับ';
+          response = '⏰ วรวุฒิ เพ็ชรราย สแกนเข้าประตูหน้า 1 เมื่อเวลา 07:42 น. (ตรงเวลา) อุณหภูมิปกติ 36.5°C ครับ';
         } else if (q.includes('เงิน') || q.includes('บัตร') || q.includes('กระเป๋า') || q.includes('อาหาร')) {
           response = '💳 ยอดเงินคงเหลือในบัตร Smart Pass: ฿420.00 (ใช้ซื้ออาหารและเครื่องดื่มไป ฿75.00 วันนี้)';
         } else if (q.includes('การบ้าน') || q.includes('งาน') || q.includes('คะแนน')) {
@@ -636,7 +636,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           นักเรียนในความปกครอง
                         </span>
                         <span className="text-[15px] font-bold text-white">
-                          วรวุฒิ เพ็ชรระยา (ม.6/1)
+                          วรวุฒิ เพ็ชรราย (ม.6/1)
                         </span>
                       </div>
                       <div className="text-right">

@@ -636,7 +636,7 @@ export default function App() {
 
     // Add success notifications across roles
     const commitSnippet = lastCommitSha ? ` • ซิงค์ GitHub Commit: [${lastCommitSha.substring(0, 7)}]` : '';
-    const studentThaiName = user?.thaiName || user?.name || 'นายวรวุฒิ เพ็ชรระยา';
+    const studentThaiName = user?.thaiName || user?.name || 'นายวรวุฒิ เพ็ชรราย';
 
     // 1. Notification for STUDENT
     const studentNotif: NotificationItem = {

@@ -54,10 +54,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     status: string;
   }>>(() => {
     return getLocalCache('admin_live_gate_traffic', [
-      { name: 'วรวุฒิ เพ็ชรระยา', role: 'นักเรียน ม.6/1', gate: 'Main Gate 01 (RFID)', time: '07:48:12', status: 'ผ่านสำเร็จ' },
+      { name: 'วรวุฒิ เพ็ชรราย', role: 'นักเรียน ม.6/1', gate: 'Main Gate 01 (RFID)', time: '07:48:12', status: 'ผ่านสำเร็จ' },
       { name: 'อ. กิตติพงษ์ เลิศพิริยะ', role: 'อาจารย์กลุ่มสาระฯ วิทย์', gate: 'Faculty Room 401', time: '07:25:04', status: 'ผ่านสำเร็จ' },
       { name: 'พิชชา ศิริพร', role: 'นักเรียน ม.6/1', gate: 'Main Gate 01 (RFID)', time: '07:48:50', status: 'ผ่านสำเร็จ' },
-      { name: 'นายสมบัติ เพ็ชรระยา', role: 'ผู้ปกครอง', gate: 'Visitor Gate (Security)', time: '08:10:15', status: 'ผ่านสำเร็จ' },
+      { name: 'นายสมบัติ เพ็ชรราย', role: 'ผู้ปกครอง', gate: 'Visitor Gate (Security)', time: '08:10:15', status: 'ผ่านสำเร็จ' },
     ]);
   });
 

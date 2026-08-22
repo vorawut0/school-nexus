@@ -33,7 +33,7 @@ const INITIAL_MANAGED_USERS: ManagedUser[] = [
   {
     id: 'sn-std-01',
     name: 'WORAWUT PETCHRAYA',
-    thaiName: 'วรวุฒิ เพ็ชรระยา',
+    thaiName: 'วรวุฒิ เพ็ชรราย',
     role: 'student',
     code: '66040217',
     departmentOrGrade: 'มัธยมศึกษาปีที่ 6/1',
@@ -73,10 +73,10 @@ const INITIAL_MANAGED_USERS: ManagedUser[] = [
   {
     id: 'sn-par-01',
     name: 'PARENT PETCHRAYA',
-    thaiName: 'นายสมบัติ เพ็ชรระยา (ผู้ปกครอง)',
+    thaiName: 'นายสมบัติ เพ็ชรราย (ผู้ปกครอง)',
     role: 'parent',
     code: 'P-66040217',
-    departmentOrGrade: 'ผู้ปกครอง วรวุฒิ เพ็ชรระยา',
+    departmentOrGrade: 'ผู้ปกครอง วรวุฒิ เพ็ชรราย',
     rfidCard: 'NFC-PAR-3301',
     status: 'active',
     accessLevel: ['Visitor Gate', 'Parent Center', 'Auditorium'],

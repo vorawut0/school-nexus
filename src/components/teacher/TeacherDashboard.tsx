@@ -87,7 +87,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     {
       id: 'sub-q-1',
       studentName: 'Worawut Phetraya',
-      thaiName: 'วรวุฒิ เพ็ชรระยา',
+      thaiName: 'วรวุฒิ เพ็ชรราย',
       studentId: '66041001',
       avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=300',
       assignmentTitle: 'โครงงานโมเดล Deep Learning จำแนกภาพ CNN',

@@ -432,7 +432,7 @@ export const ShareIdQrModal: React.FC<ShareIdQrModalProps> = ({
                       <div className="col-span-2">
                         <span className="text-slate-400 block text-[10px]">นักเรียนในความดูแล</span>
                         <span className="font-semibold text-slate-800">
-                          {user.childName || 'วรวุฒิ เพ็ชรระยา (ม.6/1)'}
+                          {user.childName || 'วรวุฒิ เพ็ชรราย (ม.6/1)'}
                         </span>
                       </div>
                       <div>

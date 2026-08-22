@@ -52,7 +52,7 @@ const INITIAL_TRANSACTIONS: Transaction[] = [
   {
     id: 'tx-4',
     title: 'เติมเงินผ่าน PromptPay QR',
-    location: 'Mobile Banking (นายสมบัติ เพ็ชรระยา)',
+    location: 'Mobile Banking (นายสมบัติ เพ็ชรราย)',
     amount: 300,
     type: 'topup',
     time: '08:00 น.',
@@ -303,7 +303,7 @@ export const ParentWalletView: React.FC<ParentWalletViewProps> = ({ user }) => {
               <span className="px-2.5 py-0.5 rounded-full bg-[#1550d3]/10 text-[#1550d3] text-xs font-bold">
                 Smart Canteen & Wallet
               </span>
-              <span className="text-xs text-[#737686]">บัตรสมาร์ทการ์ด: วรวุฒิ เพ็ชรระยา (ม.6/1)</span>
+              <span className="text-xs text-[#737686]">บัตรสมาร์ทการ์ด: วรวุฒิ เพ็ชรราย (ม.6/1)</span>
             </div>
             <h1 className="text-[26px] sm:text-[32px] font-bold text-[#121b2e] leading-tight">
               กระเป๋าเงินดิจิทัล & ค่าอาหารโรงเรียน
@@ -331,7 +331,7 @@ export const ParentWalletView: React.FC<ParentWalletViewProps> = ({ user }) => {
             <div className="flex justify-between items-start relative z-10">
               <div>
                 <span className="text-xs text-white/70 block tracking-wide uppercase">SCHOOL NEXUS SMART PASS</span>
-                <h3 className="font-bold text-lg text-white mt-0.5">วรวุฒิ เพ็ชรระยา (ม.6/1)</h3>
+                <h3 className="font-bold text-lg text-white mt-0.5">วรวุฒิ เพ็ชรราย (ม.6/1)</h3>
                 <span className="text-xs text-blue-300 font-mono">ID: 66040217 • NFC-SN-8849</span>
               </div>
               <div className="flex flex-col items-end">
@@ -516,7 +516,7 @@ export const ParentWalletView: React.FC<ParentWalletViewProps> = ({ user }) => {
                   <div className="flex-1 min-w-0">
                     <span className="text-[11px] text-slate-500 block">เติมเงินเข้าบัตรนักเรียน</span>
                     <span className="font-bold text-xs sm:text-sm text-[#121b2e] block truncate">
-                      วรวุฒิ เพ็ชรระยา (ม.6/1)
+                      วรวุฒิ เพ็ชรราย (ม.6/1)
                     </span>
                     <span className="text-[10px] text-slate-400 font-mono">
                       ยอดเงินปัจจุบัน: ฿{balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
@@ -635,7 +635,7 @@ export const ParentWalletView: React.FC<ParentWalletViewProps> = ({ user }) => {
                       โรงเรียน สคูลเน็กซัส (School Nexus Canteen)
                     </span>
                     <span className="text-xs text-slate-700 font-semibold">
-                      เพื่อ: บัตรนักเรียน วรวุฒิ เพ็ชรระยา (ม.6/1)
+                      เพื่อ: บัตรนักเรียน วรวุฒิ เพ็ชรราย (ม.6/1)
                     </span>
                   </div>
 
@@ -806,7 +806,7 @@ export const ParentWalletView: React.FC<ParentWalletViewProps> = ({ user }) => {
 
                   <div className="flex justify-between text-slate-600">
                     <span>ผู้รับ:</span>
-                    <span className="font-semibold text-slate-800">วรวุฒิ เพ็ชรระยา (ม.6/1)</span>
+                    <span className="font-semibold text-slate-800">วรวุฒิ เพ็ชรราย (ม.6/1)</span>
                   </div>
 
                   <div className="flex justify-between text-slate-600">

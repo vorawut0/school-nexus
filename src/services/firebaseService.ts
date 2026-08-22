@@ -321,7 +321,7 @@ export function getDefaultSeedAccounts(): StoredAccountRecord[] {
       studentId: DEMO_PRESET_USERS.student?.studentId || '66040217',
       email: DEMO_PRESET_USERS.student?.email || 'worawut.p@schoolnexus.ac.th',
       name: DEMO_PRESET_USERS.student?.name || 'WORAWUT PETCHRAYA',
-      thaiName: DEMO_PRESET_USERS.student?.thaiName || 'วรวุฒิ เพ็ชรระยา',
+      thaiName: DEMO_PRESET_USERS.student?.thaiName || 'วรวุฒิ เพ็ชรราย',
       role: 'student',
       password: 'password',
       user: { ...(DEMO_PRESET_USERS.student || INITIAL_USER) },
@@ -343,7 +343,7 @@ export function getDefaultSeedAccounts(): StoredAccountRecord[] {
       studentId: DEMO_PRESET_USERS.parent?.studentId || 'P-66040217',
       email: DEMO_PRESET_USERS.parent?.email || 'sombat.p@gmail.com',
       name: DEMO_PRESET_USERS.parent?.name || 'PARENT PETCHRAYA',
-      thaiName: DEMO_PRESET_USERS.parent?.thaiName || 'นายสมบัติ เพ็ชรระยา',
+      thaiName: DEMO_PRESET_USERS.parent?.thaiName || 'นายสมบัติ เพ็ชรราย',
       role: 'parent',
       password: 'password',
       user: { ...DEMO_PRESET_USERS.parent },
@@ -1556,7 +1556,7 @@ export async function simulateRoleRealtimeNotification(role: UserRole): Promise<
     const pool = [
       {
         title: '📝 มีนักเรียนส่งการบ้านใหม่',
-        message: `วรวุฒิ เพ็ชรระยา (ม.6/1) ส่ง "โครงงานโมเดล Deep Learning จำแนกภาพ CNN" เรียบร้อยแล้ว`,
+        message: `วรวุฒิ เพ็ชรราย (ม.6/1) ส่ง "โครงงานโมเดล Deep Learning จำแนกภาพ CNN" เรียบร้อยแล้ว`,
         type: 'assignment' as const,
         priority: 'high' as const,
         icon: 'rate_review',
@@ -1601,7 +1601,7 @@ export async function simulateRoleRealtimeNotification(role: UserRole): Promise<
   if (role === 'parent') {
     const pool = [
       {
-        title: '🚌 แจ้งเตือนการเข้าเรียน: นายวรวุฒิ เพ็ชรระยา',
+        title: '🚌 แจ้งเตือนการเข้าเรียน: นายวรวุฒิ เพ็ชรราย',
         message: `แตะบัตร RFID ผ่านประตูหลักโรงเรียนเรียบร้อย (เวลา ${nowStr} น.) สถานะ: ตรงเวลา`,
         type: 'attendance' as const,
         priority: 'normal' as const,
@@ -1808,8 +1808,8 @@ export function subscribeToSecurityAuditLogs(callback: (logs: SecurityAuditLog[]
   const cached = getLocalCache<SecurityAuditLog[]>('nexus_audit_logs', []);
   const sanitizedCached = (cached || []).map((l) => ({
     ...l,
-    actorName: l.actorName?.replace('เพ็ชรไรย์', 'เพ็ชรระยา') || l.actorName,
-    details: l.details?.replace('เพ็ชรไรย์', 'เพ็ชรระยา') || l.details,
+    actorName: l.actorName?.replace(/เพ็ชร(ระยา|ไรย์|ไพ|รัต)/g, 'เพ็ชรราย') || l.actorName,
+    details: l.details?.replace(/เพ็ชร(ระยา|ไรย์|ไพ|รัต)/g, 'เพ็ชรราย') || l.details,
   }));
   if (sanitizedCached.length > 0) {
     callback(sanitizedCached);
@@ -1827,8 +1827,8 @@ export function subscribeToSecurityAuditLogs(callback: (logs: SecurityAuditLog[]
             logs.push({
               id: doc.id,
               ...data,
-              actorName: data.actorName?.replace('เพ็ชรไรย์', 'เพ็ชรระยา') || data.actorName,
-              details: data.details?.replace('เพ็ชรไรย์', 'เพ็ชรระยา') || data.details,
+              actorName: data.actorName?.replace(/เพ็ชร(ระยา|ไรย์|ไพ|รัต)/g, 'เพ็ชรราย') || data.actorName,
+              details: data.details?.replace(/เพ็ชร(ระยา|ไรย์|ไพ|รัต)/g, 'เพ็ชรราย') || data.details,
             });
           });
           logs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -1842,7 +1842,7 @@ export function subscribeToSecurityAuditLogs(callback: (logs: SecurityAuditLog[]
               actionType: 'role_switch',
               severity: 'medium',
               actorId: 'ADM-001',
-              actorName: 'วรวุฒิ เพ็ชรระยา',
+              actorName: 'วรวุฒิ เพ็ชรราย',
               actorRole: 'admin',
               targetId: 'ADM-001',
               targetName: 'Super Administrator',

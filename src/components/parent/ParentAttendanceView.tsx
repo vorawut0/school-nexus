@@ -103,7 +103,7 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
     // 1. Real-time Notification for TEACHER
     await pushRealtimeNotification({
       title: '📋 มีคำขอลาหยุดเรียนใหม่ (จากผู้ปกครอง)',
-      message: `ผู้ปกครองของ นายวรวุฒิ เพ็ชรระยา ยื่นขอ${leaveTypeThai} วันที่ ${startDate} (เหตุผล: "${leaveReason}")`,
+      message: `ผู้ปกครองของ นายวรวุฒิ เพ็ชรราย ยื่นขอ${leaveTypeThai} วันที่ ${startDate} (เหตุผล: "${leaveReason}")`,
       type: 'attendance',
       priority: 'high',
       role: 'teacher',
@@ -140,7 +140,7 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
                 Parent Portal
               </span>
               <span className="text-xs text-[#737686]">
-                ข้อมูลนักเรียนในความดูแล: {user.childName || 'วรวุฒิ เพ็ชรระยา'} (ม.6/1)
+                ข้อมูลนักเรียนในความดูแล: {user.childName || 'วรวุฒิ เพ็ชรราย'} (ม.6/1)
               </span>
             </div>
             <h1 className="text-[26px] sm:text-[32px] font-bold text-[#121b2e] leading-tight">

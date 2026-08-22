@@ -287,7 +287,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         {user.role === 'student' && (user.grade || 'มัธยมศึกษาปีที่ 6/1')}
                         {user.role === 'teacher' && (user.position || 'อาจารย์ชำนาญการพิเศษ')}
                         {user.role === 'admin' && (user.position || 'ผู้ดูแลระบบไอทีและเครือข่าย')}
-                        {user.role === 'parent' && (user.childName || 'วรวุฒิ เพ็ชรระยา (ม.6/1)')}
+                        {user.role === 'parent' && (user.childName || 'วรวุฒิ เพ็ชรราย (ม.6/1)')}
                       </div>
                     </div>
                     <div className="text-right">
@@ -562,7 +562,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <div className="p-3 rounded-xl bg-[#f1f3ff]">
                 <div className="text-[11px] text-[#737686] font-semibold">นักเรียนในความดูแล</div>
                 <div className="text-[14px] font-bold text-[#00694d] truncate">
-                  {user.childName || 'วรวุฒิ เพ็ชรระยา'}
+                  {user.childName || 'วรวุฒิ เพ็ชรราย'}
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-[#f1f3ff]">
