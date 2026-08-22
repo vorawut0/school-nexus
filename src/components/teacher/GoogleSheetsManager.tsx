@@ -10,8 +10,16 @@ import {
   getSpreadsheetMetadata,
   readSheetRange,
   extractSpreadsheetId,
+  saveRubricToFirestore,
+  saveScheduleToFirestore,
+  subscribeToFirestoreRubrics,
+  subscribeToGoogleSheetConnections,
+  deleteGoogleSheetConnectionFromFirestore,
+  exportFirestoreGradesToGoogleSheet,
+  exportAttendanceToGoogleSheet,
   AssignmentRubric,
   GoogleSheetMetadata,
+  GoogleSheetConnection,
 } from '../../services/googleSheetsService';
 import { WEEKLY_TEACHER_SCHEDULE } from '../../data/mockData';
 
@@ -22,7 +30,7 @@ interface GoogleSheetsManagerProps {
   className?: string;
 }
 
-type ModeType = 'rubric' | 'schedule' | 'raw';
+type ModeType = 'rubric' | 'schedule' | 'grades_attendance' | 'linked_sheets' | 'raw';
 
 // Sample spreadsheet template URLs for immediate testing
 const SAMPLE_URLS = {
@@ -54,21 +62,39 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const [loadedRawData, setLoadedRawData] = useState<{ header: string[]; rows: any[][] } | null>(null);
   const [metadata, setMetadata] = useState<GoogleSheetMetadata | null>(null);
 
+  // Firestore Realtime Subscriptions
+  const [savedFirestoreRubrics, setSavedFirestoreRubrics] = useState<AssignmentRubric[]>([]);
+  const [linkedConnections, setLinkedConnections] = useState<GoogleSheetConnection[]>([]);
+  const [autoSyncToFirestore, setAutoSyncToFirestore] = useState<boolean>(true);
+
   // Filter for schedule tab
   const [selectedScheduleDay, setSelectedScheduleDay] = useState<string>('all');
   // Search within raw table
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Check auth status on mount
+  // Check auth status on mount & Subscribe to Firestore collections
   useEffect(() => {
     getGoogleAccessToken().then((token) => {
       setIsAuthenticated(Boolean(token));
     });
+
+    const unsubRubrics = subscribeToFirestoreRubrics((rubrics) => {
+      setSavedFirestoreRubrics(rubrics);
+    });
+
+    const unsubConnections = subscribeToGoogleSheetConnections((connections) => {
+      setLinkedConnections(connections);
+    });
+
+    return () => {
+      unsubRubrics();
+      unsubConnections();
+    };
   }, []);
 
   const showNotification = (msg: string) => {
     setSuccessToast(msg);
-    setTimeout(() => setSuccessToast(null), 4000);
+    setTimeout(() => setSuccessToast(null), 4500);
   };
 
   // Google OAuth sign-in trigger
@@ -78,7 +104,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       setErrorMessage(null);
       await signInWithGoogleSheets();
       setIsAuthenticated(true);
-      showNotification('เชื่อมต่อกับ Google Workspace สำเร็จแล้ว!');
+      showNotification('เชื่อมต่อบัญชี Google Workspace สำเร็จแล้ว!');
     } catch (err: any) {
       console.error('Google Sign-In failed:', err);
       setErrorMessage(err.message || 'ไม่สามารถเชื่อมต่อ Google Workspace ได้');
@@ -101,7 +127,6 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
         setSelectedTabName(tabNames[0]);
       }
     } catch (err) {
-      // Non-fatal if metadata query fails before auth
       console.debug('Failed to pre-fetch metadata:', err);
     }
   };
@@ -131,7 +156,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
         const tabs = currentMeta.sheets.map((s) => s.title);
         setAvailableTabs(tabs);
       } catch {
-        // Continue if meta fetch throws but direct read might work
+        // Continue
       }
 
       // 2. Fetch specific mode data
@@ -140,14 +165,32 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
         setLoadedRubric(rubricData);
         setLoadedSchedule(null);
         setLoadedRawData(null);
-        showNotification(`นำเข้าเกณฑ์ประเมิน "${rubricData.title}" (${rubricData.criteria.length} หัวข้อ) สำเร็จ!`);
+
+        // Auto Save to Firestore if enabled
+        if (autoSyncToFirestore) {
+          await saveRubricToFirestore(rubricData, user);
+          showNotification(`ดึงเกณฑ์ "${rubricData.title}" จาก Google Sheets และบันทึกลง Cloud Firestore สำเร็จ!`);
+        } else {
+          showNotification(`นำเข้าเกณฑ์ประเมิน "${rubricData.title}" (${rubricData.criteria.length} หัวข้อ) สำเร็จ!`);
+        }
       } else if (selectedMode === 'schedule') {
         const scheduleData = await importScheduleFromSpreadsheet(cleanId, selectedTabName || undefined);
         setLoadedSchedule(scheduleData);
         setLoadedRubric(null);
         setLoadedRawData(null);
         const totalItems = scheduleData.reduce((sum, d) => sum + d.items.length, 0);
-        showNotification(`นำเข้าตารางสอน (${totalItems} คาบเรียน) สำเร็จ!`);
+
+        if (autoSyncToFirestore) {
+          await saveScheduleToFirestore(scheduleData, user, {
+            id: cleanId,
+            url: `https://docs.google.com/spreadsheets/d/${cleanId}`,
+            title: currentMeta?.title || 'ตารางสอน',
+          });
+          showNotification(`นำเข้าตารางสอน (${totalItems} คาบ) และบันทึกลง Cloud Firestore สำเร็จ!`);
+        } else {
+          showNotification(`นำเข้าตารางสอน (${totalItems} คาบเรียน) สำเร็จ!`);
+        }
+
         if (onScheduleImported) {
           onScheduleImported(scheduleData);
         }
@@ -179,7 +222,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
     }
   };
 
-  // Quick export demo rubric template
+  // Quick export demo rubric template to Google Sheets & Firebase
   const handleCreateRubricTemplate = async () => {
     try {
       setIsLoading(true);
@@ -235,10 +278,24 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
         sampleCriteria
       );
 
+      // Also persist to Firestore
+      const newRubric: AssignmentRubric = {
+        id: `rubric-${res.spreadsheetId}`,
+        title: 'โครงงานวิทยาศาสตร์และเทคโนโลยี 2569',
+        subjectCode: 'CS33201',
+        spreadsheetId: res.spreadsheetId,
+        spreadsheetUrl: res.spreadsheetUrl,
+        sheetName: 'เกณฑ์การประเมิน',
+        totalMaxScore: 100,
+        criteria: sampleCriteria,
+        authorId: user.id,
+        authorName: user.thaiName || user.name,
+      };
+
+      await saveRubricToFirestore(newRubric, user);
+      setLoadedRubric(newRubric);
       setSheetUrl(res.spreadsheetUrl);
-      showNotification(`สร้างสเปรดชีตเกณฑ์ประเมิน "${res.title}" บน Google Drive เรียบร้อยแล้ว!`);
-      // Auto fetch created sheet
-      await handleFetchData();
+      showNotification(`สร้างสเปรดชีตบน Google Drive และซิงค์เข้า Firebase Firestore สำเร็จ!`);
     } catch (err: any) {
       console.error('Create rubric template error:', err);
       setErrorMessage(err.message || 'ไม่สามารถสร้างสเปรดชีตแม่แบบเกณฑ์ประเมินได้');
@@ -247,7 +304,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
     }
   };
 
-  // Quick export current teacher schedule to Google Sheets
+  // Quick export current teacher schedule to Google Sheets & Firebase
   const handleExportScheduleToSheets = async () => {
     try {
       setIsLoading(true);
@@ -265,11 +322,77 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
         `ตารางสอน_${user.thaiName || user.name}_ภาคเรียน1-2569`
       );
 
+      await saveScheduleToFirestore(scheduleDays, user, {
+        id: res.spreadsheetId,
+        url: res.spreadsheetUrl,
+        title: res.title,
+      });
+
       setSheetUrl(res.spreadsheetUrl);
-      showNotification(`ส่งออกตารางสอนไปยัง Google Sheets (${res.exportedRowsCount} คาบ) สำเร็จ!`);
+      showNotification(`ส่งออกตารางสอนไปยัง Google Sheets (${res.exportedRowsCount} คาบ) และบันทึกลง Firebase แล้ว!`);
     } catch (err: any) {
       console.error('Export schedule error:', err);
       setErrorMessage(err.message || 'ไม่สามารถส่งออกตารางสอนไปยัง Google Sheets ได้');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Export Student Grades from Firebase Firestore to Google Sheets
+  const handleExportGradesFromFirestore = async () => {
+    try {
+      setIsLoading(true);
+      setErrorMessage(null);
+
+      const mockSubmissions = [
+        { studentId: 'STD-6701', studentName: 'สมชาย ใจดี', score: 28, maxScore: 30, feedback: 'วิเคราะห์ได้ดีมาก ครบถ้วนทุกประเด็น', status: 'graded', submittedAt: '22 ส.ค. 09:30' },
+        { studentId: 'STD-6702', studentName: 'สุภาวดี รักเรียน', score: 26, maxScore: 30, feedback: 'เนื้อหาถูกต้อง รูปเล่มเรียบร้อย', status: 'graded', submittedAt: '22 ส.ค. 10:15' },
+        { studentId: 'STD-6703', studentName: 'กิตติศักดิ์ พัฒนา', score: 22, maxScore: 30, feedback: 'ควรเพิ่มเติมส่วนการอ้างอิงข้อมูล', status: 'graded', submittedAt: '22 ส.ค. 11:00' },
+        { studentId: 'STD-6704', studentName: 'นริศรา มีสุข', score: 29, maxScore: 30, feedback: 'ยอดเยี่ยม โครงงานมีความคิดสร้างสรรค์สูง', status: 'graded', submittedAt: '22 ส.ค. 11:45' },
+      ];
+
+      const res = await exportFirestoreGradesToGoogleSheet(
+        'ใบงานโครงงานวิทยาศาสตร์ ม.5/1',
+        'CS33201',
+        mockSubmissions
+      );
+
+      setSheetUrl(res.spreadsheetUrl);
+      showNotification(`ส่งออกคะแนนเก็บจาก Firestore ไปยัง Google Sheets (${res.exportedRowsCount} รายการ) สำเร็จ!`);
+    } catch (err: any) {
+      console.error('Export grades error:', err);
+      setErrorMessage(err.message || 'ไม่สามารถส่งออกคะแนนไปยัง Google Sheets ได้');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Export Attendance from Firebase Firestore to Google Sheets
+  const handleExportAttendanceFromFirestore = async () => {
+    try {
+      setIsLoading(true);
+      setErrorMessage(null);
+
+      const mockAttendance = [
+        { studentId: 'STD-6701', studentName: 'สมชาย ใจดี', status: 'present' as const, checkInTime: '08:15', note: 'สแกน QR หน้าห้อง' },
+        { studentId: 'STD-6702', studentName: 'สุภาวดี รักเรียน', status: 'present' as const, checkInTime: '08:18', note: 'สแกน QR หน้าห้อง' },
+        { studentId: 'STD-6703', studentName: 'กิตติศักดิ์ พัฒนา', status: 'late' as const, checkInTime: '08:35', note: 'รถติด' },
+        { studentId: 'STD-6704', studentName: 'นริศรา มีสุข', status: 'present' as const, checkInTime: '08:12', note: 'สแกน QR หน้าห้อง' },
+        { studentId: 'STD-6705', studentName: 'ธนกฤต มั่งมี', status: 'leave' as const, note: 'ลาป่วย มีใบรับรองแพทย์' },
+      ];
+
+      const todayStr = new Date().toLocaleDateString('th-TH');
+      const res = await exportAttendanceToGoogleSheet(
+        todayStr,
+        'ม.5/1 (CS33201)',
+        mockAttendance
+      );
+
+      setSheetUrl(res.spreadsheetUrl);
+      showNotification(`ส่งออกบันทึกเวลาเรียนจาก Firestore ไปยัง Google Sheets สำเร็จ!`);
+    } catch (err: any) {
+      console.error('Export attendance error:', err);
+      setErrorMessage(err.message || 'ไม่สามารถส่งออกข้อมูลเช็กชื่อไปยัง Google Sheets ได้');
     } finally {
       setIsLoading(false);
     }
@@ -281,6 +404,15 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       onApplyRubricToGrading(loadedRubric);
     }
     showNotification(`นำเกณฑ์ "${loadedRubric.title}" ไปใช้กับการตรวจงานเรียบร้อยแล้ว`);
+  };
+
+  const handleDeleteConnection = async (id: string) => {
+    try {
+      await deleteGoogleSheetConnectionFromFirestore(id);
+      showNotification('ลบการเชื่อมต่อสเปรดชีตแล้ว');
+    } catch (err: any) {
+      setErrorMessage(err.message || 'ไม่สามารถลบการเชื่อมต่อได้');
+    }
   };
 
   // Filtered schedule list
@@ -318,30 +450,35 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       {/* Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center shadow-xs border border-emerald-200 shrink-0">
-            <span className="material-symbols-outlined text-[24px]">table_chart</span>
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center shadow-sm shrink-0">
+            <span className="material-symbols-outlined text-[24px]">cloud_sync</span>
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
-                ศูนย์เชื่อมต่อ Google Sheets (Live Data Sync)
+                ศูนย์ซิงค์ฐานข้อมูลคู่ (Google Sheets + Firebase Firestore)
               </h2>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-100/80 text-emerald-800 text-[10px] font-extrabold border border-emerald-300">
-                Google Workspace API
-              </span>
+              <div className="flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold border border-emerald-300">
+                  Google Sheets API
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-extrabold border border-amber-300">
+                  Firebase Firestore
+                </span>
+              </div>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              ดึงเกณฑ์การให้คะแนน (Rubric), ตารางสอน, หรือตารางข้อมูลจากสเปรดชีตมาแสดงผลแบบ Real-time
+              เชื่อมต่อสเปรดชีตแบบ 2-Way Live Sync เพื่อเก็บเกณฑ์ Rubrics, ตารางสอน, คะแนนเก็บ, และบันทึกเช็กชื่อบนคลาวด์แบบถาวร
             </p>
           </div>
         </div>
 
         {/* Auth / Connection Status */}
-        <div className="flex items-center gap-2 shrink-0 self-start md:self-auto">
+        <div className="flex flex-wrap items-center gap-2 shrink-0 self-start md:self-auto">
           {isAuthenticated ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Google เชื่อมต่อแล้ว</span>
+              <span>Google + Firebase เชื่อมต่อแล้ว</span>
             </div>
           ) : (
             <button
@@ -367,17 +504,17 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                 />
               </svg>
-              <span>{isAuthenticating ? 'กำลังเชื่อมต่อ...' : 'เชื่อมต่อบัญชี Google'}</span>
+              <span>{isAuthenticating ? 'กำลังเชื่อมต่อ...' : 'เชื่อมต่อ Google'}</span>
             </button>
           )}
 
-          {/* Quick Create Buttons Dropdown / Actions */}
+          {/* Quick Create Buttons */}
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleCreateRubricTemplate}
               disabled={isLoading}
               className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-              title="สร้างสเปรดชีตแม่แบบเกณฑ์ประเมินใหม่บน Google Drive"
+              title="สร้างสเปรดชีตแม่แบบเกณฑ์ประเมินใหม่บน Google Drive และบันทึกลง Firestore"
             >
               <span className="material-symbols-outlined text-[16px]">add_box</span>
               <span className="hidden sm:inline">สร้าง Rubric แม่แบบ</span>
@@ -387,7 +524,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
               onClick={handleExportScheduleToSheets}
               disabled={isLoading}
               className="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-              title="ส่งออกตารางสอนปัจจุบันไปยัง Google Sheets"
+              title="ส่งออกตารางสอนปัจจุบันไปยัง Google Sheets & Firestore"
             >
               <span className="material-symbols-outlined text-[16px]">file_upload</span>
               <span className="hidden sm:inline">ส่งออกตารางสอน</span>
@@ -398,13 +535,13 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
 
       {/* Mode Selector Tabs */}
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-2xl w-full sm:w-auto">
           <button
             onClick={() => {
               setSelectedMode('rubric');
               setErrorMessage(null);
             }}
-            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               selectedMode === 'rubric'
                 ? 'bg-white text-blue-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -419,7 +556,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
               setSelectedMode('schedule');
               setErrorMessage(null);
             }}
-            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               selectedMode === 'schedule'
                 ? 'bg-white text-blue-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -431,247 +568,324 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
 
           <button
             onClick={() => {
+              setSelectedMode('grades_attendance');
+              setErrorMessage(null);
+            }}
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              selectedMode === 'grades_attendance'
+                ? 'bg-white text-blue-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">grade</span>
+            <span>ส่งออกคะแนน/เช็กชื่อ (Firestore → Sheets)</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setSelectedMode('linked_sheets');
+              setErrorMessage(null);
+            }}
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              selectedMode === 'linked_sheets'
+                ? 'bg-white text-blue-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">hub</span>
+            <span>ชีตที่ผูกไว้ใน Firestore ({linkedConnections.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
               setSelectedMode('raw');
               setErrorMessage(null);
             }}
-            className={`flex-1 sm:flex-none px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               selectedMode === 'raw'
                 ? 'bg-white text-blue-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <span className="material-symbols-outlined text-[16px]">grid_on</span>
-            <span>ตารางทั่วไป (Custom Sheet)</span>
+            <span>ตารางทั่วไป</span>
           </button>
         </div>
 
-        {/* Sample URL Quick Inserter */}
-        <div className="flex items-center gap-1 text-xs text-slate-500">
-          <span className="font-semibold">ทดลองใส่ URL:</span>
-          <button
-            type="button"
-            onClick={() => {
-              setSheetUrl(SAMPLE_URLS.rubric);
-              handleInspectMetadata(SAMPLE_URLS.rubric);
-            }}
-            className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer transition-colors"
-          >
-            ตัวอย่างเกณฑ์ Rubric
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setSheetUrl(SAMPLE_URLS.schedule);
-              handleInspectMetadata(SAMPLE_URLS.schedule);
-            }}
-            className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer transition-colors"
-          >
-            ตัวอย่างตารางสอน
-          </button>
+        {/* Auto Sync Toggle & Sample URL */}
+        <div className="flex items-center gap-3 text-xs">
+          <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={autoSyncToFirestore}
+              onChange={(e) => setAutoSyncToFirestore(e.target.checked)}
+              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+            />
+            <span>บันทึกลง Cloud Firestore อัตโนมัติ</span>
+          </label>
         </div>
       </div>
 
-      {/* URL Input Form */}
-      <form onSubmit={handleFetchData} className="mt-4 space-y-3">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-          <div className="relative flex-1">
-            <span className="absolute left-3.5 top-3 text-slate-400 material-symbols-outlined text-[18px]">
-              link
-            </span>
-            <input
-              type="text"
-              value={sheetUrl}
-              onChange={(e) => {
-                setSheetUrl(e.target.value);
-                handleInspectMetadata(e.target.value);
-              }}
-              placeholder="วาง Google Sheets URL (เช่น https://docs.google.com/spreadsheets/d/.../edit) หรือ Spreadsheet ID"
-              className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 border border-slate-300 focus:border-blue-500 focus:bg-white text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all"
-            />
-            {sheetUrl && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSheetUrl('');
-                  setMetadata(null);
-                  setAvailableTabs([]);
-                  setLoadedRubric(null);
-                  setLoadedSchedule(null);
-                  setLoadedRawData(null);
+      {/* URL Input Form (for rubric, schedule, and raw modes) */}
+      {(selectedMode === 'rubric' || selectedMode === 'schedule' || selectedMode === 'raw') && (
+        <form onSubmit={handleFetchData} className="mt-4 space-y-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <div className="relative flex-1">
+              <span className="absolute left-3.5 top-3 text-slate-400 material-symbols-outlined text-[18px]">
+                link
+              </span>
+              <input
+                type="text"
+                value={sheetUrl}
+                onChange={(e) => {
+                  setSheetUrl(e.target.value);
+                  handleInspectMetadata(e.target.value);
                 }}
-                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-
-          {/* Sheet Tab Picker if metadata discovered */}
-          {availableTabs.length > 0 && (
-            <select
-              value={selectedTabName}
-              onChange={(e) => setSelectedTabName(e.target.value)}
-              className="py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 outline-none focus:border-blue-500 cursor-pointer"
-            >
-              {availableTabs.map((tab) => (
-                <option key={tab} value={tab}>
-                  แท็บ: {tab}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {/* Fetch Data Button */}
-          <button
-            type="submit"
-            disabled={isLoading || !sheetUrl.trim()}
-            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-50 shrink-0"
-          >
-            {isLoading ? (
-              <>
-                <span className="material-symbols-outlined text-[18px] animate-spin">refresh</span>
-                <span>กำลังดึงข้อมูล...</span>
-              </>
-            ) : (
-              <>
-                <span className="material-symbols-outlined text-[18px]">sync</span>
-                <span>ดึงข้อมูลจากชีต</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Error message banner */}
-        {errorMessage && (
-          <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start justify-between gap-3 animate-fadeIn">
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-rose-600 text-[18px] shrink-0">error</span>
-              <span>{errorMessage}</span>
+                placeholder="วาง Google Sheets URL (เช่น https://docs.google.com/spreadsheets/d/.../edit) หรือ Spreadsheet ID"
+                className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 border border-slate-300 focus:border-blue-500 focus:bg-white text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all"
+              />
+              {sheetUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSheetUrl('');
+                    setMetadata(null);
+                    setAvailableTabs([]);
+                    setLoadedRubric(null);
+                    setLoadedSchedule(null);
+                    setLoadedRawData(null);
+                  }}
+                  className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  ✕
+                </button>
+              )}
             </div>
-            {!isAuthenticated && (
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] shrink-0 cursor-pointer"
+
+            {/* Sheet Tab Picker if metadata discovered */}
+            {availableTabs.length > 0 && (
+              <select
+                value={selectedTabName}
+                onChange={(e) => setSelectedTabName(e.target.value)}
+                className="py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 outline-none focus:border-blue-500 cursor-pointer"
               >
-                เข้าสู่ระบบ Google ทันที
-              </button>
+                {availableTabs.map((tab) => (
+                  <option key={tab} value={tab}>
+                    แท็บ: {tab}
+                  </option>
+                ))}
+              </select>
             )}
+
+            {/* Fetch Data Button */}
+            <button
+              type="submit"
+              disabled={isLoading || !sheetUrl.trim()}
+              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              {isLoading ? (
+                <>
+                  <span className="material-symbols-outlined text-[18px] animate-spin">refresh</span>
+                  <span>กำลังดึงข้อมูล...</span>
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[18px]">sync</span>
+                  <span>ดึงข้อมูล & บันทึกลงคลาวด์</span>
+                </>
+              )}
+            </button>
           </div>
-        )}
-      </form>
+
+          {/* Error message banner */}
+          {errorMessage && (
+            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start justify-between gap-3 animate-fadeIn">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-rose-600 text-[18px] shrink-0">error</span>
+                <span>{errorMessage}</span>
+              </div>
+              {!isAuthenticated && (
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] shrink-0 cursor-pointer"
+                >
+                  เข้าสู่ระบบ Google ทันที
+                </button>
+              )}
+            </div>
+          )}
+        </form>
+      )}
 
       {/* =========================================================================
-          RESULT SECTION 1: RUBRIC DATA TABLE
+          TAB 1: RUBRIC DATA TABLE & FIRESTORE SAVED RUBRICS
           ========================================================================= */}
-      {loadedRubric && selectedMode === 'rubric' && (
-        <div className="mt-6 space-y-4 animate-fadeIn">
-          {/* Rubric Header Card */}
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 to-indigo-50/60 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <div className="flex flex-wrap items-center gap-2 mb-1">
-                <span className="px-2.5 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
-                  Rubric Matrix
-                </span>
-                <span className="text-xs text-slate-500 font-medium">
-                  แท็บ: {loadedRubric.sheetName || 'Sheet1'} • {loadedRubric.criteria.length} เกณฑ์ประเมิน
-                </span>
+      {selectedMode === 'rubric' && (
+        <div className="mt-6 space-y-6">
+          {loadedRubric && (
+            <div className="space-y-4 animate-fadeIn">
+              {/* Rubric Header Card */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 to-indigo-50/60 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="px-2.5 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
+                      Rubric Matrix
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
+                      ✓ บันทึกลง Cloud Firestore แล้ว
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">
+                      แท็บ: {loadedRubric.sheetName || 'Sheet1'} • {loadedRubric.criteria.length} เกณฑ์ประเมิน
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900">{loadedRubric.title}</h3>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="text-right sm:border-r border-slate-200 pr-3 mr-1">
+                    <div className="text-[10px] text-slate-500 uppercase font-bold">คะแนนเต็มรวม</div>
+                    <div className="text-xl font-black text-blue-700">{loadedRubric.totalMaxScore} คะแนน</div>
+                  </div>
+
+                  {loadedRubric.spreadsheetUrl && (
+                    <a
+                      href={loadedRubric.spreadsheetUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold flex items-center gap-1 shadow-2xs"
+                      title="เปิดดูใน Google Sheets"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-emerald-600">open_in_new</span>
+                    </a>
+                  )}
+
+                  <button
+                    onClick={handleApplyRubric}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                    <span>นำเกณฑ์ไปใช้ตรวจงาน</span>
+                  </button>
+                </div>
               </div>
-              <h3 className="text-base font-bold text-slate-900">{loadedRubric.title}</h3>
-            </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="text-right sm:border-r border-slate-200 pr-3 mr-1">
-                <div className="text-[10px] text-slate-500 uppercase font-bold">คะแนนเต็มรวม</div>
-                <div className="text-xl font-black text-blue-700">{loadedRubric.totalMaxScore} คะแนน</div>
-              </div>
-
-              {loadedRubric.spreadsheetUrl && (
-                <a
-                  href={loadedRubric.spreadsheetUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold flex items-center gap-1 shadow-2xs"
-                  title="เปิดดูใน Google Sheets"
-                >
-                  <span className="material-symbols-outlined text-[16px] text-emerald-600">open_in_new</span>
-                </a>
-              )}
-
-              <button
-                onClick={handleApplyRubric}
-                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                <span>นำเกณฑ์ไปใช้ตรวจงาน</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Responsive Rubric Table */}
-          <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-2xs">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                  <th className="py-3 px-4 w-12 text-center">ลำดับ</th>
-                  <th className="py-3 px-4 min-w-[180px]">เกณฑ์การประเมิน (Criteria)</th>
-                  <th className="py-3 px-4 min-w-[220px]">คำอธิบายเกณฑ์ (Description)</th>
-                  <th className="py-3 px-4 w-24 text-center">คะแนนเต็ม</th>
-                  <th className="py-3 px-4 min-w-[340px]">ระดับคะแนน (Scoring Levels)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {loadedRubric.criteria.map((crit, idx) => (
-                  <tr key={crit.id || idx} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="py-3.5 px-4 text-center font-bold text-slate-400">{idx + 1}</td>
-                    <td className="py-3.5 px-4 font-bold text-slate-900">{crit.name}</td>
-                    <td className="py-3.5 px-4 text-slate-600 leading-relaxed">{crit.description}</td>
-                    <td className="py-3.5 px-4 text-center font-black text-blue-600 text-sm">
-                      {crit.maxScore}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      {crit.levels && crit.levels.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {crit.levels.map((lvl, lIdx) => (
-                            <div
-                              key={lIdx}
-                              className="p-2 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px]"
-                            >
-                              <div className="font-bold text-slate-800 flex items-center justify-between mb-0.5">
-                                <span>{lvl.label}</span>
-                                <span className="text-blue-600 font-extrabold">{lvl.score} คะแนน</span>
-                              </div>
-                              <div className="text-slate-500 text-[10px] leading-tight line-clamp-2">
-                                {lvl.description}
-                              </div>
+              {/* Responsive Rubric Table */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-2xs">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                      <th className="py-3 px-4 w-12 text-center">ลำดับ</th>
+                      <th className="py-3 px-4 min-w-[180px]">เกณฑ์การประเมิน (Criteria)</th>
+                      <th className="py-3 px-4 min-w-[220px]">คำอธิบายเกณฑ์ (Description)</th>
+                      <th className="py-3 px-4 w-24 text-center">คะแนนเต็ม</th>
+                      <th className="py-3 px-4 min-w-[340px]">ระดับคะแนน (Scoring Levels)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {loadedRubric.criteria.map((crit, idx) => (
+                      <tr key={crit.id || idx} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3.5 px-4 text-center font-bold text-slate-400">{idx + 1}</td>
+                        <td className="py-3.5 px-4 font-bold text-slate-900">{crit.name}</td>
+                        <td className="py-3.5 px-4 text-slate-600 leading-relaxed">{crit.description}</td>
+                        <td className="py-3.5 px-4 text-center font-black text-blue-600 text-sm">
+                          {crit.maxScore}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {crit.levels && crit.levels.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {crit.levels.map((lvl, lIdx) => (
+                                <div
+                                  key={lIdx}
+                                  className="p-2 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px]"
+                                >
+                                  <div className="font-bold text-slate-800 flex items-center justify-between mb-0.5">
+                                    <span>{lvl.label}</span>
+                                    <span className="text-blue-600 font-extrabold">{lvl.score} คะแนน</span>
+                                  </div>
+                                  <div className="text-slate-500 text-[10px] leading-tight line-clamp-2">
+                                    {lvl.description}
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-slate-400 italic">ประเมินตามคะแนนจริง 0 - {crit.maxScore}</span>
-                      )}
-                    </td>
-                  </tr>
+                          ) : (
+                            <span className="text-slate-400 italic">ประเมินตามคะแนนจริง 0 - {crit.maxScore}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Synced Rubrics from Cloud Firestore List */}
+          {savedFirestoreRubrics.length > 0 && (
+            <div className="space-y-3 pt-4 border-t border-slate-100">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-amber-500 text-[18px]">local_fire_department</span>
+                  <span>เกณฑ์ Rubrics ที่ถูกซิงค์อยู่ใน Firebase Firestore ({savedFirestoreRubrics.length} ชุด)</span>
+                </h4>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {savedFirestoreRubrics.map((rubric) => (
+                  <div
+                    key={rubric.id}
+                    className="p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:border-blue-300 transition-all flex items-start justify-between gap-3"
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">
+                          {rubric.subjectCode || 'ทั่วไป'}
+                        </span>
+                        <span className="text-[11px] text-slate-500">
+                          {rubric.criteria?.length || 0} เกณฑ์ • เต็ม {rubric.totalMaxScore} คะแนน
+                        </span>
+                      </div>
+                      <div className="font-bold text-slate-900 text-sm">{rubric.title}</div>
+                      <div className="text-[10px] text-slate-400 mt-1">
+                        ผู้บันทึก: {rubric.authorName || 'อาจารย์'} • ซิงค์ล่าสุด: {new Date(rubric.lastSyncedAt || rubric.updatedAt || Date.now()).toLocaleDateString('th-TH')}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setLoadedRubric(rubric);
+                        if (rubric.spreadsheetUrl) setSheetUrl(rubric.spreadsheetUrl);
+                        if (onApplyRubricToGrading) onApplyRubricToGrading(rubric);
+                        showNotification(`โหลดเกณฑ์ "${rubric.title}" จาก Firestore พร้อมใช้งานแล้ว`);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shrink-0 transition-all cursor-pointer shadow-xs"
+                    >
+                      เลือกใช้เกณฑ์นี้
+                    </button>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* =========================================================================
-          RESULT SECTION 2: CLASS SCHEDULE DATA TABLE
+          TAB 2: CLASS SCHEDULE DATA TABLE
           ========================================================================= */}
-      {loadedSchedule && selectedMode === 'schedule' && (
+      {selectedMode === 'schedule' && loadedSchedule && (
         <div className="mt-6 space-y-4 animate-fadeIn">
           {/* Schedule Filter and Action Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-purple-50/70 border border-purple-200">
             <div>
-              <h3 className="text-sm font-bold text-purple-950 flex items-center gap-1.5">
+              <div className="flex items-center gap-2 mb-0.5">
                 <span className="material-symbols-outlined text-[18px] text-purple-600">calendar_today</span>
-                <span>ตารางสอนที่นำเข้าจาก Google Sheets</span>
-              </h3>
-              <p className="text-xs text-purple-800/80 mt-0.5">
+                <h3 className="text-sm font-bold text-purple-950">
+                  ตารางสอนที่นำเข้าจาก Google Sheets และบันทึกลง Firebase
+                </h3>
+              </div>
+              <p className="text-xs text-purple-800/80">
                 รวมทั้งหมด {loadedSchedule.reduce((sum, d) => sum + d.items.length, 0)} คาบเรียนในรอบสัปดาห์
               </p>
             </div>
@@ -735,7 +949,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
                         <td className="py-3.5 px-4 text-slate-600">{item.instructor || '-'}</td>
                         <td className="py-3.5 px-4 text-center">
                           <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
-                            พร้อมใช้งาน
+                            ซิงค์บน Firestore
                           </span>
                         </td>
                       </tr>
@@ -749,9 +963,160 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       )}
 
       {/* =========================================================================
-          RESULT SECTION 3: RAW CUSTOM SPREADSHEET TABLE
+          TAB 3: GRADES & ATTENDANCE EXPORT (FIRESTORE -> GOOGLE SHEETS)
           ========================================================================= */}
-      {loadedRawData && selectedMode === 'raw' && (
+      {selectedMode === 'grades_attendance' && (
+        <div className="mt-6 space-y-5 animate-fadeIn">
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200">
+            <h3 className="text-sm font-bold text-emerald-950 flex items-center gap-2">
+              <span className="material-symbols-outlined text-[20px] text-emerald-600">output</span>
+              <span>ส่งออกข้อมูลจาก Firebase Firestore ไปยัง Google Sheets</span>
+            </h3>
+            <p className="text-xs text-emerald-800/80 mt-1">
+              สร้างสเปรดชีตสมุดบันทึกคะแนน (Gradebook) หรือสมุดบันทึกเวลาเรียน (Attendance Sheet) ใน Google Drive ของคุณทันที
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Export Grades Card */}
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                <span className="material-symbols-outlined">grade</span>
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">ส่งออกสมุดบันทึกคะแนน (Gradebook)</h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  ดึงข้อมูลการส่งงานของนักเรียนและคะแนนที่ตรวจแล้วจาก Firestore ไปสร้างเป็น Google Sheet พร้อมสูตรคำนวณคะแนนเฉลี่ย
+                </p>
+              </div>
+              <button
+                onClick={handleExportGradesFromFirestore}
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[18px]">table_view</span>
+                <span>สร้างสเปรดชีตคะแนนเก็บ</span>
+              </button>
+            </div>
+
+            {/* Export Attendance Card */}
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <span className="material-symbols-outlined">how_to_reg</span>
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">ส่งออกบันทึกการเช็กชื่อ (Attendance)</h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  ส่งออกสถิติการเข้าเรียน (มา, สาย, ลา, ขาด) ประจำวันจากระบบ Firestore ไปยัง Google Sheets
+                </p>
+              </div>
+              <button
+                onClick={handleExportAttendanceFromFirestore}
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[18px]">fact_check</span>
+                <span>สร้างสเปรดชีตเช็กชื่อประจำวัน</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 4: LINKED SHEETS MANAGEMENT IN FIRESTORE
+          ========================================================================= */}
+      {selectedMode === 'linked_sheets' && (
+        <div className="mt-6 space-y-4 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span className="material-symbols-outlined text-blue-600 text-[18px]">hub</span>
+                <span>รายการ Google Sheets ทั้งหมดที่ผูกไว้ใน Cloud Firestore ({linkedConnections.length})</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                ติดตามสถานะการเชื่อมต่อสเปรดชีต และเข้าถึงไฟล์บน Google Drive ได้โดยตรง
+              </p>
+            </div>
+          </div>
+
+          {linkedConnections.length === 0 ? (
+            <div className="p-8 rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 text-center">
+              <span className="material-symbols-outlined text-slate-400 text-[32px] mb-2">cloud_off</span>
+              <p className="text-xs font-bold text-slate-600">ยังไม่มีสเปรดชีตที่ผูกไว้ใน Firestore</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                เมื่อคุณนำเข้าเกณฑ์ Rubric หรือสร้างตารางสอน ข้อมูลการเชื่อมต่อจะถูกบันทึกลง Firestore อัตโนมัติ
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-2xs">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                    <th className="py-3 px-4">ชื่อสเปรดชีต</th>
+                    <th className="py-3 px-4">ประเภทข้อมูล</th>
+                    <th className="py-3 px-4">ทิศทางการซิงค์</th>
+                    <th className="py-3 px-4">ซิงค์ล่าสุด</th>
+                    <th className="py-3 px-4 text-center">สถานะ</th>
+                    <th className="py-3 px-4 text-right">การจัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {linkedConnections.map((conn) => (
+                    <tr key={conn.id} className="hover:bg-slate-50/70">
+                      <td className="py-3.5 px-4 font-bold text-slate-900">
+                        <div className="flex items-center gap-2">
+                          <span className="material-symbols-outlined text-emerald-600 text-[18px]">table_chart</span>
+                          <span>{conn.title}</span>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold text-[10px]">
+                          {conn.type === 'rubric' ? 'เกณฑ์ประเมิน Rubric' : conn.type === 'schedule' ? 'ตารางสอน' : 'ข้อมูลทั่วไป'}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-600 font-medium">
+                        {conn.syncDirection === 'two-way' ? '↔ 2-Way Live Sync' : '→ Import to Firestore'}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-500">
+                        {new Date(conn.lastSyncedAt).toLocaleString('th-TH')}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                          ✓ ซิงค์สมบูรณ์
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right space-x-1.5">
+                        <a
+                          href={conn.spreadsheetUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold inline-flex items-center gap-1"
+                        >
+                          <span>เปิดดู</span>
+                          <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                        </a>
+                        <button
+                          onClick={() => handleDeleteConnection(conn.id)}
+                          className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold inline-flex items-center"
+                          title="ลบการเชื่อมต่อ"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 5: RAW CUSTOM SPREADSHEET TABLE
+          ========================================================================= */}
+      {selectedMode === 'raw' && loadedRawData && (
         <div className="mt-6 space-y-4 animate-fadeIn">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
             <div>
@@ -806,7 +1171,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       )}
 
       {/* Empty State placeholder */}
-      {!loadedRubric && !loadedSchedule && !loadedRawData && !isLoading && (
+      {!loadedRubric && !loadedSchedule && !loadedRawData && selectedMode !== 'linked_sheets' && selectedMode !== 'grades_attendance' && !isLoading && (
         <div className="mt-6 p-8 rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 flex flex-col items-center justify-center text-center">
           <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3">
             <span className="material-symbols-outlined text-[28px]">format_list_bulleted_add</span>

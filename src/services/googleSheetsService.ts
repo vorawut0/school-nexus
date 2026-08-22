@@ -4,8 +4,26 @@ import {
   onAuthStateChanged,
   User,
 } from 'firebase/auth';
-import { auth } from '../firebase';
-import { ScheduleItem } from '../types';
+import {
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  deleteDoc,
+  collection,
+  onSnapshot,
+  query,
+  orderBy,
+} from 'firebase/firestore';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
+import {
+  ScheduleItem,
+  UserProfile,
+  AssignmentRubric,
+  GoogleSheetConnection,
+  SyncedScheduleDay,
+} from '../types';
+import { cleanFirestoreData } from './firebaseService';
 
 /**
  * Google Workspace OAuth Scopes configured for Google Sheets & Drive integration
@@ -33,19 +51,7 @@ export interface AssignmentRubricCriteria {
   levels?: RubricLevel[];
 }
 
-export interface AssignmentRubric {
-  id: string;
-  title: string;
-  subjectCode?: string;
-  subjectTitle?: string;
-  spreadsheetId?: string;
-  sheetName?: string;
-  spreadsheetUrl?: string;
-  totalMaxScore: number;
-  criteria: AssignmentRubricCriteria[];
-  generalInstructions?: string;
-  lastSyncedAt?: string;
-}
+export type { AssignmentRubric, GoogleSheetConnection, SyncedScheduleDay };
 
 export interface GoogleSheetMetadata {
   spreadsheetId: string;
@@ -688,3 +694,360 @@ export async function importScheduleFromSpreadsheet(
     items,
   }));
 }
+
+/* =========================================================================
+   FEATURE 3: GOOGLE SHEETS & FIREBASE FIRESTORE HYBRID DATABASE BRIDGE
+   ========================================================================= */
+
+/**
+ * Persist an Assignment Rubric (fetched from Google Sheets) directly into Cloud Firestore
+ */
+export async function saveRubricToFirestore(
+  rubric: AssignmentRubric,
+  user?: UserProfile
+): Promise<void> {
+  const path = `googleSheetRubrics/${rubric.id}`;
+  try {
+    const docRef = doc(db, 'googleSheetRubrics', rubric.id);
+    const rubricPayload: AssignmentRubric = {
+      ...rubric,
+      authorId: user?.id || rubric.authorId || 'teacher-default',
+      authorName: user?.thaiName || user?.name || rubric.authorName || 'อาจารย์',
+      authorRole: user?.role || 'teacher',
+      updatedAt: new Date().toISOString(),
+      lastSyncedAt: new Date().toISOString(),
+      syncedWithFirestore: true,
+      syncedWithSheets: true,
+    };
+
+    await setDoc(docRef, cleanFirestoreData(rubricPayload));
+
+    // Also update Google Sheet connection record
+    if (rubric.spreadsheetId) {
+      await saveGoogleSheetConnection({
+        id: `conn-rubric-${rubric.spreadsheetId}`,
+        title: rubric.title,
+        type: 'rubric',
+        spreadsheetId: rubric.spreadsheetId,
+        spreadsheetUrl: rubric.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${rubric.spreadsheetId}`,
+        sheetName: rubric.sheetName,
+        lastSyncedAt: new Date().toISOString(),
+        syncDirection: 'two-way',
+        authorId: user?.id,
+        authorName: user?.thaiName || user?.name,
+        recordCount: rubric.criteria.length,
+        status: 'synced',
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+/**
+ * Fetch a rubric from Google Sheets and immediately save it to Firestore
+ */
+export async function fetchAndSyncRubricToFirestore(
+  spreadsheetIdOrUrl: string,
+  sheetName?: string,
+  user?: UserProfile
+): Promise<AssignmentRubric> {
+  const rubric = await fetchRubricFromSheet(spreadsheetIdOrUrl, sheetName);
+  await saveRubricToFirestore(rubric, user);
+  return rubric;
+}
+
+/**
+ * Subscribe to all Rubrics saved in Firestore with real-time updates
+ */
+export function subscribeToFirestoreRubrics(
+  onUpdate: (rubrics: AssignmentRubric[]) => void
+): () => void {
+  const path = 'googleSheetRubrics';
+  try {
+    const q = query(collection(db, 'googleSheetRubrics'), orderBy('updatedAt', 'desc'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: AssignmentRubric[] = [];
+        snapshot.forEach((d) => {
+          list.push(d.data() as AssignmentRubric);
+        });
+        onUpdate(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return () => {};
+  }
+}
+
+/**
+ * Persist imported schedule days from Google Sheets into Firestore
+ */
+export async function saveScheduleToFirestore(
+  scheduleDays: { dayName: string; items: ScheduleItem[] }[],
+  user?: UserProfile,
+  spreadsheetMeta?: { id: string; url: string; title: string }
+): Promise<void> {
+  const path = 'googleSheetSchedules';
+  try {
+    for (const group of scheduleDays) {
+      const docId = `day-${group.dayName.replace(/\s+/g, '')}`;
+      const docRef = doc(db, 'googleSheetSchedules', docId);
+      const data: SyncedScheduleDay = {
+        id: docId,
+        dayName: group.dayName,
+        items: group.items,
+        spreadsheetId: spreadsheetMeta?.id,
+        spreadsheetUrl: spreadsheetMeta?.url,
+        lastSyncedAt: new Date().toISOString(),
+        authorId: user?.id,
+      };
+      await setDoc(docRef, cleanFirestoreData(data));
+    }
+
+    if (spreadsheetMeta) {
+      const totalCount = scheduleDays.reduce((sum, d) => sum + d.items.length, 0);
+      await saveGoogleSheetConnection({
+        id: `conn-schedule-${spreadsheetMeta.id}`,
+        title: spreadsheetMeta.title || 'ตารางสอนและตารางเรียน',
+        type: 'schedule',
+        spreadsheetId: spreadsheetMeta.id,
+        spreadsheetUrl: spreadsheetMeta.url,
+        lastSyncedAt: new Date().toISOString(),
+        syncDirection: 'import',
+        authorId: user?.id,
+        authorName: user?.thaiName || user?.name,
+        recordCount: totalCount,
+        status: 'synced',
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    throw error;
+  }
+}
+
+/**
+ * Subscribe to Schedules synced in Firestore
+ */
+export function subscribeToFirestoreSchedules(
+  onUpdate: (days: SyncedScheduleDay[]) => void
+): () => void {
+  const path = 'googleSheetSchedules';
+  try {
+    const q = query(collection(db, 'googleSheetSchedules'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: SyncedScheduleDay[] = [];
+        snapshot.forEach((d) => {
+          list.push(d.data() as SyncedScheduleDay);
+        });
+        onUpdate(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return () => {};
+  }
+}
+
+/**
+ * Save Google Sheet Connection state into Firestore
+ */
+export async function saveGoogleSheetConnection(
+  connection: GoogleSheetConnection
+): Promise<void> {
+  const path = `googleSheetConnections/${connection.id}`;
+  try {
+    const docRef = doc(db, 'googleSheetConnections', connection.id);
+    await setDoc(docRef, cleanFirestoreData(connection), { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Subscribe to all Google Sheet connections registered in Firestore
+ */
+export function subscribeToGoogleSheetConnections(
+  onUpdate: (connections: GoogleSheetConnection[]) => void
+): () => void {
+  const path = 'googleSheetConnections';
+  try {
+    const q = query(collection(db, 'googleSheetConnections'), orderBy('lastSyncedAt', 'desc'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: GoogleSheetConnection[] = [];
+        snapshot.forEach((d) => {
+          list.push(d.data() as GoogleSheetConnection);
+        });
+        onUpdate(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return () => {};
+  }
+}
+
+/**
+ * Delete a linked Google Sheet connection from Firestore
+ */
+export async function deleteGoogleSheetConnectionFromFirestore(
+  connectionId: string
+): Promise<void> {
+  const path = `googleSheetConnections/${connectionId}`;
+  try {
+    const docRef = doc(db, 'googleSheetConnections', connectionId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+/**
+ * Export student grading results from Firestore to a Google Sheet Gradebook
+ */
+export async function exportFirestoreGradesToGoogleSheet(
+  assignmentTitle: string,
+  subjectCode: string,
+  submissions: {
+    studentId: string;
+    studentName: string;
+    score: number;
+    maxScore: number;
+    feedback?: string;
+    status: string;
+    submittedAt?: string;
+  }[]
+): Promise<ScheduleExportResult> {
+  const sheetTitle = `สมุดบันทึกคะแนน_${subjectCode}_${assignmentTitle.slice(0, 20)}_${new Date().getFullYear()}`;
+  const created = await createSpreadsheet(sheetTitle, ['ใบคะแนนเก็บ']);
+  const targetTab = 'ใบคะแนนเก็บ';
+
+  const rows: any[][] = [
+    [`สมุดบันทึกคะแนน (Gradebook) - ${assignmentTitle}`, '', '', '', '', '', ''],
+    ['รหัสวิชา:', subjectCode || '-', 'ซิงค์จากระบบ:', 'Firebase Firestore Live Data', 'วันที่ส่งออก:', new Date().toLocaleString('th-TH')],
+    [''],
+    ['ลำดับ', 'รหัสนักเรียน', 'ชื่อ-นามสกุล', 'คะแนนที่ได้', 'คะแนนเต็ม', 'สถานะ', 'ข้อเสนอแนะอาจารย์', 'เวลาที่ส่งงาน'],
+  ];
+
+  let totalScore = 0;
+  submissions.forEach((sub, idx) => {
+    totalScore += sub.score;
+    rows.push([
+      idx + 1,
+      sub.studentId,
+      sub.studentName,
+      sub.score,
+      sub.maxScore,
+      sub.status === 'graded' ? 'ตรวจแล้ว' : 'รอตรวจ',
+      sub.feedback || '-',
+      sub.submittedAt || '-',
+    ]);
+  });
+
+  rows.push(['']);
+  const avgScore = submissions.length > 0 ? (totalScore / submissions.length).toFixed(2) : '0';
+  rows.push(['คะแนนเฉลี่ยทั้งห้อง', '', '', avgScore, submissions[0]?.maxScore || 100, `จำนวนนักเรียน ${submissions.length} คน`, '', '']);
+
+  await updateSheetValues(created.spreadsheetId, `'${targetTab}'!A1:H${rows.length}`, rows);
+
+  return {
+    success: true,
+    spreadsheetId: created.spreadsheetId,
+    spreadsheetUrl: created.spreadsheetUrl,
+    title: created.title,
+    exportedRowsCount: submissions.length,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Export attendance records from Firestore to a Google Sheet
+ */
+export async function exportAttendanceToGoogleSheet(
+  dateLabel: string,
+  classNameLabel: string,
+  attendanceList: {
+    studentId: string;
+    studentName: string;
+    status: 'present' | 'absent' | 'late' | 'leave';
+    checkInTime?: string;
+    note?: string;
+  }[]
+): Promise<ScheduleExportResult> {
+  const sheetTitle = `เช็กชื่อเข้าเรียน_${classNameLabel}_${dateLabel.replace(/\//g, '-')}`;
+  const created = await createSpreadsheet(sheetTitle, ['บันทึกเวลาเรียน']);
+  const targetTab = 'บันทึกเวลาเรียน';
+
+  const rows: any[][] = [
+    [`บันทึกเวลาเรียน (Attendance Record) - ${classNameLabel}`, '', '', '', '', ''],
+    ['วันที่:', dateLabel, 'ฐานข้อมูล:', 'Firebase Cloud Firestore', 'สร้างเมื่อ:', new Date().toLocaleString('th-TH')],
+    [''],
+    ['ลำดับ', 'รหัสนักเรียน', 'ชื่อ-นามสกุล', 'สถานะการเข้าเรียน', 'เวลาเช็กชื่อ', 'หมายเหตุ'],
+  ];
+
+  let presentCount = 0;
+  let lateCount = 0;
+  let absentCount = 0;
+  let leaveCount = 0;
+
+  attendanceList.forEach((att, idx) => {
+    let statusText = 'มาเรียน';
+    if (att.status === 'present') {
+      presentCount++;
+      statusText = '✓ มาเรียน (Present)';
+    } else if (att.status === 'late') {
+      lateCount++;
+      statusText = '⚡ มาสาย (Late)';
+    } else if (att.status === 'absent') {
+      absentCount++;
+      statusText = '✕ ขาดเรียน (Absent)';
+    } else if (att.status === 'leave') {
+      leaveCount++;
+      statusText = '✉ ลา (Leave)';
+    }
+
+    rows.push([
+      idx + 1,
+      att.studentId,
+      att.studentName,
+      statusText,
+      att.checkInTime || '-',
+      att.note || '-',
+    ]);
+  });
+
+  rows.push(['']);
+  rows.push(['สรุปยอดรวม:', `มา: ${presentCount} คน`, `สาย: ${lateCount} คน`, `ลา: ${leaveCount} คน`, `ขาด: ${absentCount} คน`, `รวมทั้งหมด: ${attendanceList.length} คน`]);
+
+  await updateSheetValues(created.spreadsheetId, `'${targetTab}'!A1:F${rows.length}`, rows);
+
+  return {
+    success: true,
+    spreadsheetId: created.spreadsheetId,
+    spreadsheetUrl: created.spreadsheetUrl,
+    title: created.title,
+    exportedRowsCount: attendanceList.length,
+    createdAt: new Date().toISOString(),
+  };
+}
+

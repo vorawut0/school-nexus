@@ -238,7 +238,43 @@ export interface AssignmentRubric {
   totalMaxScore: number;
   criteria: AssignmentRubricCriteria[];
   generalInstructions?: string;
+  authorId?: string;
+  authorName?: string;
+  authorRole?: UserRole;
+  createdAt?: string;
+  updatedAt?: string;
   lastSyncedAt?: string;
+  syncedWithFirestore?: boolean;
+  syncedWithSheets?: boolean;
+}
+
+export interface GoogleSheetConnection {
+  id: string;
+  title: string;
+  type: 'rubric' | 'schedule' | 'grades' | 'attendance' | 'custom';
+  spreadsheetId: string;
+  spreadsheetUrl: string;
+  sheetName?: string;
+  lastSyncedAt: string;
+  syncDirection: 'import' | 'export' | 'two-way';
+  autoSyncEnabled?: boolean;
+  authorId?: string;
+  authorName?: string;
+  recordCount?: number;
+  status: 'synced' | 'pending' | 'error';
+  errorMessage?: string;
+}
+
+export interface SyncedScheduleDay {
+  id: string;
+  dayName: string;
+  dayId?: string;
+  items: ScheduleItem[];
+  spreadsheetId?: string;
+  spreadsheetUrl?: string;
+  sheetName?: string;
+  lastSyncedAt: string;
+  authorId?: string;
 }
 
 export interface GithubCommitInfo {
