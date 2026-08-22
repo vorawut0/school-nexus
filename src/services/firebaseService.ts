@@ -2109,6 +2109,13 @@ export async function resetAllSystemDataAndFactoryDefaults(): Promise<{
       'sn_parent_leave_requests',
       'sn_parent_balance',
       'sn_emergency_lockdown',
+      'sn_cache_admin_gate_scans',
+      'sn_cache_admin_failed_scans',
+      'sn_cache_admin_solar_kwh',
+      'sn_cache_admin_active_iot_nodes',
+      'sn_admin_gate_scans',
+      'sn_admin_solar_kwh',
+      'sn_scan_session_history',
     ];
 
     keysToRemove.forEach((k) => {
@@ -2118,6 +2125,11 @@ export async function resetAllSystemDataAndFactoryDefaults(): Promise<{
         // ignore
       }
     });
+
+    setLocalCache('admin_gate_scans', 0);
+    setLocalCache('admin_failed_scans', 0);
+    setLocalCache('admin_solar_kwh', 0);
+    setLocalCache('admin_active_iot_nodes', 0);
 
     // 2. Clear & Seed Firestore Collections
     const collectionsToReset = [

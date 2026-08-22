@@ -23,17 +23,94 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onOpenDigitalIdModal,
   onOpenQrScanner,
 }) => {
-  const [totalUsers, setTotalUsers] = useState<number>(1248);
-  const [activeUsersCount, setActiveUsersCount] = useState<number>(412);
-  const [studentCount, setStudentCount] = useState<number>(1120);
-  const [teacherCount, setTeacherCount] = useState<number>(85);
-  const [parentCount, setParentCount] = useState<number>(38);
-  const [adminCount, setAdminCount] = useState<number>(5);
+  const [totalUsers, setTotalUsers] = useState<number>(() => {
+    return getLocalCache<UserProfile[]>('all_users_list', []).length || 2;
+  });
+  const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
+  const [studentCount, setStudentCount] = useState<number>(1);
+  const [teacherCount, setTeacherCount] = useState<number>(0);
+  const [parentCount, setParentCount] = useState<number>(0);
+  const [adminCount, setAdminCount] = useState<number>(1);
+
+  // Dynamic system metrics initialized to zero / clean slate
+  const [gateScansCount, setGateScansCount] = useState<number>(() => {
+    return getLocalCache<number>('admin_gate_scans', 0);
+  });
+  const [failedScansCount, setFailedScansCount] = useState<number>(() => {
+    return getLocalCache<number>('admin_failed_scans', 0);
+  });
+  const [solarKwh, setSolarKwh] = useState<number>(() => {
+    return getLocalCache<number>('admin_solar_kwh', 0.0);
+  });
+  const [activeIotNodes, setActiveIotNodes] = useState<number>(() => {
+    return getLocalCache<number>('admin_active_iot_nodes', 0);
+  });
+  const [liveGateTraffic, setLiveGateTraffic] = useState<Array<{
+    name: string;
+    role: string;
+    gate: string;
+    time: string;
+    status: string;
+  }>>(() => {
+    return getLocalCache('admin_live_gate_traffic', []);
+  });
 
   const [emergencyLockdownActive, setEmergencyLockdownActive] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [iotStatus, setIotStatus] = useState<'normal' | 'optimized' | 'standby'>('normal');
+
+  // Handle System Full Reset Event & Scan Events
+  useEffect(() => {
+    const handleReset = () => {
+      setGateScansCount(0);
+      setFailedScansCount(0);
+      setSolarKwh(0.0);
+      setActiveIotNodes(0);
+      setLiveGateTraffic([]);
+      setLocalCache('admin_gate_scans', 0);
+      setLocalCache('admin_failed_scans', 0);
+      setLocalCache('admin_solar_kwh', 0.0);
+      setLocalCache('admin_active_iot_nodes', 0);
+      setLocalCache('admin_live_gate_traffic', []);
+    };
+
+    const handleGateScanned = (e: any) => {
+      const detail = e.detail || {};
+      setGateScansCount((prev) => {
+        const next = prev + 1;
+        setLocalCache('admin_gate_scans', next);
+        return next;
+      });
+      if (detail.success === false) {
+        setFailedScansCount((prev) => {
+          const next = prev + 1;
+          setLocalCache('admin_failed_scans', next);
+          return next;
+        });
+      }
+      setLiveGateTraffic((prev) => {
+        const newItem = {
+          name: detail.userName || 'ผู้ใช้งาน',
+          role: detail.userRole || 'นักเรียน',
+          gate: detail.gateName || 'Main Gate 01 (RFID)',
+          time: new Date().toLocaleTimeString('th-TH'),
+          status: detail.success === false ? 'ปฏิเสธการเข้า (Denied)' : 'ผ่านสำเร็จ',
+        };
+        const nextList = [newItem, ...prev].slice(0, 10);
+        setLocalCache('admin_live_gate_traffic', nextList);
+        return nextList;
+      });
+    };
+
+    window.addEventListener('sn_system_full_reset', handleReset);
+    window.addEventListener('sn_gate_scanned', handleGateScanned);
+
+    return () => {
+      window.removeEventListener('sn_system_full_reset', handleReset);
+      window.removeEventListener('sn_gate_scanned', handleGateScanned);
+    };
+  }, []);
 
   // Broadcast Announcement State
   const [showBroadcastModal, setShowBroadcastModal] = useState<boolean>(false);
@@ -387,10 +464,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="material-symbols-outlined text-[18px]">sensors</span>
               </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-black text-blue-600">42 / 42</div>
-            <div className="text-[11px] text-emerald-600 font-semibold mt-1 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span>พร้อมทำงาน 100% (HVAC & Door)</span>
+            <div className="text-2xl sm:text-3xl font-black text-blue-600">
+              {activeIotNodes} / 42
+            </div>
+            <div className={`text-[11px] font-semibold mt-1 flex items-center gap-1 ${activeIotNodes > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+              <span className={`w-2 h-2 rounded-full ${activeIotNodes > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
+              <span>{activeIotNodes > 0 ? `พร้อมทำงาน ${Math.round((activeIotNodes / 42) * 100)}% (HVAC & Door)` : 'โหมดสแตนด์บาย 0% (พร้อมเปิดใช้งาน)'}</span>
             </div>
           </div>
 
@@ -404,10 +483,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="material-symbols-outlined text-[18px]">contactless</span>
               </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-black text-emerald-600">1,894</div>
+            <div className="text-2xl sm:text-3xl font-black text-emerald-600">
+              {gateScansCount.toLocaleString()}
+            </div>
             <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-              <span className="text-emerald-700 font-bold">สำเร็จ 99.8%</span>
-              <span>(แตะผิดจุด 3 ครั้ง)</span>
+              {gateScansCount > 0 ? (
+                <>
+                  <span className="text-emerald-700 font-bold">
+                    สำเร็จ {(((gateScansCount - failedScansCount) / Math.max(1, gateScansCount)) * 100).toFixed(1)}%
+                  </span>
+                  <span>(แตะผิดจุด {failedScansCount} ครั้ง)</span>
+                </>
+              ) : (
+                <span className="text-slate-500 font-medium">0 ครั้ง (เริ่มต้นวันใหม่/พร้อมรับสแกน)</span>
+              )}
             </div>
           </div>
 
@@ -418,9 +507,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="material-symbols-outlined text-[18px]">solar_power</span>
               </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-black text-amber-600">84.5 <span className="text-sm font-semibold text-slate-500">kWh</span></div>
+            <div className="text-2xl sm:text-3xl font-black text-amber-600">
+              {solarKwh.toFixed(1)} <span className="text-sm font-semibold text-slate-500">kWh</span>
+            </div>
             <div className="text-[11px] text-amber-700 font-semibold mt-1">
-              ประหยัดไฟ 32% ของเป้าหมาย
+              {solarKwh > 0 ? `ประหยัดไฟ ${Math.min(100, Math.round(solarKwh / 2.6))}% ของเป้าหมาย` : 'ประหยัดไฟ 0% (พร้อมเริ่มสะสมพลังงาน)'}
             </div>
           </div>
         </div>
@@ -541,38 +632,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <div className="divide-y divide-slate-100">
-                {[
-                  { name: 'วรวุฒิ เพ็ชรระยา', role: 'นักเรียน ม.6/1', gate: 'Main Gate 01 (RFID)', time: '07:48:12', status: 'ผ่านสำเร็จ' },
-                  { name: 'อ. กิตติพงษ์ เลิศพิริยะ', role: 'อาจารย์กลุ่มสาระฯ วิทย์', gate: 'Faculty Room 401', time: '07:25:04', status: 'ผ่านสำเร็จ' },
-                  { name: 'พิชชา ศิริพร', role: 'นักเรียน ม.6/1', gate: 'Main Gate 01 (RFID)', time: '07:48:50', status: 'ผ่านสำเร็จ' },
-                  { name: 'นายสมบัติ เพ็ชรระยา', role: 'ผู้ปกครอง', gate: 'Visitor Gate (Security)', time: '08:10:15', status: 'ผ่านสำเร็จ' },
-                  { name: 'ไม่ทราบรหัสบัตร (Tag Unknown)', role: 'บุคคลภายนอก', gate: 'Server Data Center', time: '06:40:02', status: 'ปฏิเสธการเข้า (Denied)' },
-                ].map((item, idx) => (
-                  <div key={idx} className="py-3 flex items-center justify-between gap-3 text-xs">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                        item.status.includes('ปฏิเสธ') ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
-                      }`}>
-                        <span className="material-symbols-outlined text-[18px]">
-                          {item.status.includes('ปฏิเสธ') ? 'block' : 'check'}
-                        </span>
+                {liveGateTraffic.length > 0 ? (
+                  liveGateTraffic.map((item, idx) => (
+                    <div key={idx} className="py-3 flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                          item.status.includes('ปฏิเสธ') ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
+                        }`}>
+                          <span className="material-symbols-outlined text-[18px]">
+                            {item.status.includes('ปฏิเสธ') ? 'block' : 'check'}
+                          </span>
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-900">{item.name}</div>
+                          <div className="text-[11px] text-slate-500">{item.role} • {item.gate}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-bold text-slate-900">{item.name}</div>
-                        <div className="text-[11px] text-slate-500">{item.role} • {item.gate}</div>
-                      </div>
-                    </div>
 
-                    <div className="text-right shrink-0">
-                      <div className={`font-semibold text-[11px] ${
-                        item.status.includes('ปฏิเสธ') ? 'text-red-600' : 'text-emerald-600'
-                      }`}>
-                        {item.status}
+                      <div className="text-right shrink-0">
+                        <div className={`font-semibold text-[11px] ${
+                          item.status.includes('ปฏิเสธ') ? 'text-red-600' : 'text-emerald-600'
+                        }`}>
+                          {item.status}
+                        </div>
+                        <div className="text-[10px] text-slate-400">{item.time} น.</div>
                       </div>
-                      <div className="text-[10px] text-slate-400">{item.time} น.</div>
                     </div>
+                  ))
+                ) : (
+                  <div className="py-8 flex flex-col items-center justify-center text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 mb-2">
+                      <span className="material-symbols-outlined text-2xl">sensors</span>
+                    </div>
+                    <p className="text-xs font-bold text-slate-600">ยังไม่มีรายการแตะบัตรผ่านประตูในรอบนี้</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">ระบบเชื่อมต่อประตูทุกจุดพร้อมรับสัญญาณสแกน Real-time ทันที</p>
                   </div>
-                ))}
+                )}
               </div>
             </div>
 

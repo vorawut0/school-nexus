@@ -255,6 +255,22 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
         return updated;
       });
 
+      // Dispatch event to sync admin live gate traffic & scan counter
+      try {
+        window.dispatchEvent(
+          new CustomEvent('sn_gate_scanned', {
+            detail: {
+              userName: title.replace('สแกนโปรไฟล์: ', '').replace('สแกนรหัส: ', ''),
+              userRole: type === 'faculty_id' ? 'อาจารย์/บุคลากร' : type === 'student_id' ? 'นักเรียน' : 'ผู้ใช้งาน',
+              gate: 'Smart Gate 01 (NFC/QR)',
+              success: true,
+            },
+          })
+        );
+      } catch {
+        // Ignore
+      }
+
       setJustScannedAnim(true);
       setTimeout(() => setJustScannedAnim(false), 3000);
     },

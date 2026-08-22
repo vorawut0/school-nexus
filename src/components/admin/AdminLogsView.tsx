@@ -75,7 +75,18 @@ export const AdminLogsView: React.FC<AdminLogsViewProps> = ({ user }) => {
   const [isRunningDiagnostic, setIsRunningDiagnostic] = useState(false);
   const [diagnosticResult, setDiagnosticResult] = useState<string | null>(null);
 
-  // Subscribe to real-time dedicated Firebase 'audit_logs' collection
+  // Listen to system full reset event
+  useEffect(() => {
+    const handleReset = () => {
+      setLogs([]);
+      setSecurityAudits([]);
+      setDiagnosticResult(null);
+    };
+    window.addEventListener('sn_system_full_reset', handleReset);
+    return () => {
+      window.removeEventListener('sn_system_full_reset', handleReset);
+    };
+  }, []);
   useEffect(() => {
     const unsub = subscribeToSecurityAuditLogs((auditList) => {
       setSecurityAudits(auditList);
