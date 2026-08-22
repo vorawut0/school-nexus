@@ -11,7 +11,6 @@ interface HeaderProps {
   onOpenNotifications: () => void;
   onOpenProfile: () => void;
   onOpenAITutor?: () => void;
-  onOpenInstallApp?: () => void;
   onSyncComplete?: (syncedCount: number) => void;
 }
 
@@ -22,7 +21,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSearch,
   onOpenNotifications,
   onOpenProfile,
-  onOpenInstallApp,
 }) => {
   return (
     <header className="sticky top-0 inset-x-0 z-50 w-full bg-white/95 backdrop-blur-xl border-b border-[#e8ecf3] shadow-xs">
@@ -71,18 +69,6 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {onOpenInstallApp && (
-            <button
-              onClick={onOpenInstallApp}
-              className="hidden lg:flex px-2 sm:px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-800 items-center gap-1.5 text-[12px] font-bold active:scale-95 transition-all shadow-2xs cursor-pointer shrink-0"
-              title="ติดตั้งแอปพลิเคชันบนมือถือ (Android & iOS)"
-              aria-label="Install Mobile App"
-            >
-              <span className="material-symbols-outlined text-[17px] text-emerald-600">install_mobile</span>
-              <span className="whitespace-nowrap">แอปมือถือ</span>
-            </button>
-          )}
-
           <button
             onClick={onOpenSearch}
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-[#434654] hover:text-[#1550d3] hover:bg-[#1550d3]/5 active:scale-95 transition-all shrink-0 cursor-pointer"

@@ -28,7 +28,6 @@ interface DashboardViewProps {
   onOpenAITutor?: () => void;
   onOpenCampusPulse?: (tab?: CampusPulseTab) => void;
   onOpenShareId?: () => void;
-  onOpenInstallApp?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -42,7 +41,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenAITutor,
   onOpenCampusPulse,
   onOpenShareId,
-  onOpenInstallApp,
 }) => {
   const [aiQuery, setAiQuery] = useState('');
   const [aiThinking, setAiThinking] = useState(false);
@@ -688,31 +686,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             );
           })()}
-
-          {/* Mobile Install Quick Chip */}
-          {onOpenInstallApp && (
-            <div className="mt-3 flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-slate-900 to-blue-950 text-white shadow-sm border border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <span className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-lg">install_mobile</span>
-                </span>
-                <div>
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>แอปมือถือ School Nexus</span>
-                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-bold">Android & iOS</span>
-                  </div>
-                  <div className="text-[11px] text-slate-400">ติดตั้งบนหน้าจอมือถือ เปิดเต็มจอ ใช้งานออฟไลน์</div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={onOpenInstallApp}
-                className="py-1.5 px-3 rounded-xl bg-[#1550d3] hover:bg-[#1a53d6] text-white text-xs font-bold transition-all shadow-xs active:scale-95 cursor-pointer whitespace-nowrap"
-              >
-                ติดตั้งแอป
-              </button>
-            </div>
-          )}
         </section>
 
         {/* Section 3: Today's Schedule Timeline */}

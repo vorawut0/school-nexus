@@ -42,7 +42,6 @@ import { QRScannerModal } from './components/modals/QRScannerModal';
 import { DigitalIdModal } from './components/modals/DigitalIdModal';
 import { ShareIdQrModal } from './components/modals/ShareIdQrModal';
 import { CampusPulseModal, CampusPulseTab } from './components/modals/CampusPulseModal';
-import { MobileAppInstallModal } from './components/modals/MobileAppInstallModal';
 import { ChangeIdPhotoModal } from './components/modals/ChangeIdPhotoModal';
 import { EditProfileModal } from './components/modals/EditProfileModal';
 import { RealtimeNotificationBanner } from './components/RealtimeNotificationBanner';
@@ -346,31 +345,8 @@ export default function App() {
   const [showShareIdModal, setShowShareIdModal] = useState<boolean>(false);
   const [showCampusPulseModal, setShowCampusPulseModal] = useState<boolean>(false);
   const [campusPulseInitialTab, setCampusPulseInitialTab] = useState<CampusPulseTab>('overview');
-  const [showMobileInstallModal, setShowMobileInstallModal] = useState<boolean>(false);
   const [showChangePhotoModal, setShowChangePhotoModal] = useState<boolean>(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState<boolean>(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-
-  // Capture PWA Install prompt on Android/Chrome
-  useEffect(() => {
-    const handleBeforeInstall = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
-  }, []);
-
-  const handleTriggerInstall = async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
-        setDeferredPrompt(null);
-        setShowMobileInstallModal(false);
-      }
-    }
-  };
 
   // AI Tutor Sidebar state
   const [showAITutorSidebar, setShowAITutorSidebar] = useState<boolean>(false);
@@ -859,7 +835,6 @@ export default function App() {
         onOpenNotifications={() => setShowNotificationDrawer(true)}
         onOpenProfile={() => setCurrentTab('profile')}
         onOpenAITutor={() => handleOpenAITutor(null)}
-        onOpenInstallApp={() => setShowMobileInstallModal(true)}
         onSyncComplete={(count) => {
           setOfflineToast(`ซิงค์ข้อมูล ${count} รายการไปยัง Firestore สำเร็จแล้ว`);
           setTimeout(() => setOfflineToast(null), 4000);
@@ -955,7 +930,6 @@ export default function App() {
               onOpenAITutor={() => handleOpenAITutor(null)}
               onOpenCampusPulse={(tab) => handleOpenCampusPulse(tab)}
               onOpenShareId={() => setShowShareIdModal(true)}
-              onOpenInstallApp={() => setShowMobileInstallModal(true)}
             />
           )
         )}
@@ -1086,7 +1060,6 @@ export default function App() {
             onOpenGpaModal={() => setShowGpaModal(true)}
             onOpenShareId={() => setShowShareIdModal(true)}
             onOpenIdCardModal={() => setShowDigitalIdModal(true)}
-            onOpenInstallApp={() => setShowMobileInstallModal(true)}
             onOpenChangePhoto={() => setShowChangePhotoModal(true)}
             onOpenEditProfile={() => setShowEditProfileModal(true)}
           />
@@ -1278,14 +1251,6 @@ export default function App() {
         initialTab={campusPulseInitialTab}
         onClose={() => setShowCampusPulseModal(false)}
         totalStudents={1248}
-      />
-
-      {/* Mobile App Installation & Cross-Platform Modal */}
-      <MobileAppInstallModal
-        isOpen={showMobileInstallModal}
-        onClose={() => setShowMobileInstallModal(false)}
-        deferredPrompt={deferredPrompt}
-        onTriggerInstall={handleTriggerInstall}
       />
 
       {/* Edit Profile with Debounced Firestore Auto-save */}

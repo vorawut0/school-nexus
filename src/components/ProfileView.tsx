@@ -23,7 +23,6 @@ interface ProfileViewProps {
   onOpenGpaModal: () => void;
   onOpenShareId?: () => void;
   onOpenIdCardModal?: () => void;
-  onOpenInstallApp?: () => void;
   onOpenChangePhoto?: () => void;
   onOpenEditProfile?: () => void;
 }
@@ -41,7 +40,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onOpenGpaModal,
   onOpenShareId,
   onOpenIdCardModal,
-  onOpenInstallApp,
   onOpenChangePhoto,
   onOpenEditProfile,
 }) => {
@@ -586,34 +584,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           </section>
         )}
-
-        {/* Mobile App & Cross-Platform Center */}
-        <section className="bg-gradient-to-br from-[#0c1527] to-[#1550d3] rounded-2xl p-5 sm:p-6 text-white shadow-lg shadow-blue-950/20 border border-blue-900/40 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-36 h-36 bg-blue-400/10 rounded-full blur-2xl pointer-events-none" />
-          <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-1.5 max-w-md">
-              <div className="flex items-center gap-2">
-                <span className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center border border-white/20">
-                  <span className="material-symbols-outlined text-amber-300 text-lg">phone_iphone</span>
-                </span>
-                <h3 className="font-bold text-[16px] text-white">ติดตั้งแอปบนมือถือ (Android & iOS)</h3>
-              </div>
-              <p className="text-xs text-blue-100/80 leading-relaxed">
-                ติดตั้งเป็นแอปเต็มรูปแบบบนหน้าจอสมาร์ตโฟน เปิดใช้งานได้ทันที มีระบบแคชออฟไลน์ และสแกนบัตรนักเรียนได้รวดเร็ว
-              </p>
-            </div>
-            {onOpenInstallApp && (
-              <button
-                type="button"
-                onClick={onOpenInstallApp}
-                className="py-2.5 px-5 rounded-xl bg-white text-[#0c1527] hover:bg-blue-50 font-extrabold text-xs flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all shrink-0 cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-base text-blue-600">download</span>
-                <span>เปิดศูนย์ติดตั้งแอป</span>
-              </button>
-            )}
-          </div>
-        </section>
 
         {/* App Settings */}
         <section className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-200/80 flex flex-col gap-3.5">
