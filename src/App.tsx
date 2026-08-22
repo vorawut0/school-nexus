@@ -80,9 +80,40 @@ import {
 } from './services/firebaseService';
 
 export default function App() {
-  // Always enforce mandatory login on every new session / opening the link
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [currentTab, setCurrentTab] = useState<string>('dashboard');
+  // Session persistence across page refreshes
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    try {
+      const isLocked = localStorage.getItem('sn_is_auto_locked') === 'true';
+      if (isLocked) return null;
+
+      const cached = getLocalCache<UserProfile | null>('sn_active_user', null);
+      if (cached && cached.id) {
+        const customAvatar = getPersistedAvatar(cached);
+        return customAvatar ? { ...cached, avatar: customAvatar } : cached;
+      }
+      const rawUser = localStorage.getItem('sn_active_user') || localStorage.getItem('sn_user_profile');
+      if (rawUser) {
+        const parsed = JSON.parse(rawUser) as UserProfile;
+        if (parsed && parsed.id) {
+          const customAvatar = getPersistedAvatar(parsed);
+          return customAvatar ? { ...parsed, avatar: customAvatar } : parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+
+  const [currentTab, setCurrentTab] = useState<string>(() => {
+    try {
+      const savedTab = localStorage.getItem('sn_active_tab');
+      if (savedTab) return savedTab;
+    } catch {
+      // ignore
+    }
+    return 'dashboard';
+  });
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     return getLocalCache<NotificationItem[]>('notifications', MOCK_NOTIFICATIONS);
   });
@@ -127,6 +158,30 @@ export default function App() {
       // ignore
     }
   }, [theme]);
+
+  // Synchronize active tab to localStorage for page refresh persistence
+  useEffect(() => {
+    try {
+      if (currentTab) {
+        localStorage.setItem('sn_active_tab', currentTab);
+      }
+    } catch {
+      // ignore
+    }
+  }, [currentTab]);
+
+  // Synchronize active user to localStorage for page refresh persistence
+  useEffect(() => {
+    try {
+      if (user) {
+        localStorage.setItem('sn_active_user', JSON.stringify(user));
+        localStorage.setItem('sn_user_profile', JSON.stringify(user));
+        setLocalCache('sn_active_user', user);
+      }
+    } catch {
+      // ignore
+    }
+  }, [user]);
 
   const handleToggleTheme = () => {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
@@ -404,6 +459,8 @@ export default function App() {
   const handleSignOut = () => {
     try {
       localStorage.removeItem('sn_active_user');
+      localStorage.removeItem('sn_user_profile');
+      localStorage.removeItem('sn_active_tab');
       localStorage.removeItem('sn_is_auto_locked');
       localStorage.removeItem('sn_locked_user');
     } catch {
@@ -412,6 +469,7 @@ export default function App() {
     setIsAutoLocked(false);
     setLockedUser(null);
     setUser(null);
+    setCurrentTab('dashboard');
   };
 
   const handleSwitchRole = (role: UserRole) => {
