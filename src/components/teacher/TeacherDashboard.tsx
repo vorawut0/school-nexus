@@ -1,6 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { UserProfile, ScheduleItem } from '../../types';
 import { WEEKLY_TEACHER_SCHEDULE } from '../../data/mockData';
+import { GoogleSheetsManager } from './GoogleSheetsManager';
+import { AssignmentRubric } from '../../services/googleSheetsService';
 
 interface TeacherDashboardProps {
   user: UserProfile;
@@ -55,6 +57,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [inputScore, setInputScore] = useState<string>('');
   const [inputFeedback, setInputFeedback] = useState<string>('');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [activeRubric, setActiveRubric] = useState<AssignmentRubric | null>(null);
+  const sheetsSectionRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToSheets = () => {
+    sheetsSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleApplyRubricToGrading = (rubric: AssignmentRubric) => {
+    setActiveRubric(rubric);
+    showToast(`นำเกณฑ์ประเมิน "${rubric.title}" (${rubric.totalMaxScore} คะแนน) มาใช้กับการตรวจงานแล้ว`);
+  };
 
   // Quick submissions queue for teacher
   const [submissionsQueue, setSubmissionsQueue] = useState<QuickSubmission[]>([
@@ -246,8 +259,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           {/* Right: Quick Action Shortcuts */}
           <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
             <button
+              onClick={scrollToSheets}
+              className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px] text-emerald-200">table_chart</span>
+              <span>Google Sheets</span>
+            </button>
+
+            <button
               onClick={() => onNavigateTab('teacher-attendance')}
-              className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all cursor-pointer"
+              className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px]">how_to_reg</span>
               <span>เช็กชื่อคาบนี้</span>
@@ -762,6 +783,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       </div>
 
+      {/* 6. Google Sheets Realtime Integration Component */}
+      <div ref={sheetsSectionRef}>
+        <GoogleSheetsManager
+          user={user}
+          onApplyRubricToGrading={handleApplyRubricToGrading}
+        />
+      </div>
+
       {/* Quick Score Modal */}
       {quickScoreModal && (
         <div
@@ -803,6 +832,34 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   {quickScoreModal.assignmentTitle}
                 </div>
               </div>
+
+              {/* Active Rubric Criteria Guide */}
+              {activeRubric && (
+                <div className="p-3 rounded-2xl bg-blue-50/70 border border-blue-200 text-xs">
+                  <div className="flex items-center justify-between font-bold text-blue-900 mb-1.5">
+                    <div className="flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[15px] text-blue-600">fact_check</span>
+                      <span>เกณฑ์ประเมิน: {activeRubric.title}</span>
+                    </div>
+                    <span className="text-[10px] bg-blue-200/80 text-blue-900 px-2 py-0.5 rounded-full">
+                      เต็ม {activeRubric.totalMaxScore} คะแนน
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {activeRubric.criteria.map((crit, cIdx) => (
+                      <div key={cIdx} className="bg-white p-2 rounded-xl border border-blue-100 flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-slate-800 text-[11px]">{crit.name}</div>
+                          <div className="text-slate-500 text-[10px] line-clamp-1">{crit.description}</div>
+                        </div>
+                        <span className="font-bold text-blue-600 text-[11px] shrink-0">
+                          {crit.maxScore} คะแนน
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, Assignment } from '../../types';
 import { pushRealtimeNotification, updateAssignmentInFirestore } from '../../services/firebaseService';
+import { GoogleSheetsManager } from './GoogleSheetsManager';
+import { AssignmentRubric } from '../../services/googleSheetsService';
 
 interface StudentSubmission {
   id: string;
@@ -35,6 +37,8 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
   const [inputScore, setInputScore] = useState<string>('');
   const [inputFeedback, setInputFeedback] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showSheetsImporter, setShowSheetsImporter] = useState<boolean>(false);
+  const [activeRubric, setActiveRubric] = useState<AssignmentRubric | null>(null);
 
   const [submissions, setSubmissions] = useState<StudentSubmission[]>([
     {
@@ -231,35 +235,82 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
         </div>
       </div>
 
-      {/* Tabs Filter */}
-      <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl w-fit">
+      {/* Tabs Filter and Google Sheets Importer Trigger */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl w-fit">
+          <button
+            onClick={() => setSelectedTab('pending')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              selectedTab === 'pending'
+                ? 'bg-[#1550d3] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span>งานรอตรวจ</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono text-[10px] font-extrabold">
+              {pendingList.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setSelectedTab('graded')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              selectedTab === 'graded'
+                ? 'bg-[#1550d3] text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span>ตรวจแล้ว</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 font-mono text-[10px]">
+              {gradedList.length}
+            </span>
+          </button>
+        </div>
+
         <button
-          onClick={() => setSelectedTab('pending')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-            selectedTab === 'pending'
-              ? 'bg-[#1550d3] text-white shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
+          onClick={() => setShowSheetsImporter((prev) => !prev)}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+            showSheetsImporter
+              ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+              : 'bg-white hover:bg-emerald-50 text-emerald-800 border-emerald-300'
           }`}
         >
-          <span>งานรอตรวจ</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono text-[10px] font-extrabold">
-            {pendingList.length}
-          </span>
-        </button>
-        <button
-          onClick={() => setSelectedTab('graded')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-            selectedTab === 'graded'
-              ? 'bg-[#1550d3] text-white shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <span>ตรวจแล้ว</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 font-mono text-[10px]">
-            {gradedList.length}
-          </span>
+          <span className="material-symbols-outlined text-[18px]">table_chart</span>
+          <span>{showSheetsImporter ? 'ซ่อนตัวเชื่อมต่อ Google Sheets' : 'ซิงค์เกณฑ์ Rubric จาก Google Sheets'}</span>
+          {activeRubric && (
+            <span className="w-2 h-2 rounded-full bg-cyan-300 animate-ping" />
+          )}
         </button>
       </div>
+
+      {/* Embedded Google Sheets Sync Card */}
+      {showSheetsImporter && (
+        <div className="animate-fadeIn">
+          <GoogleSheetsManager
+            user={user}
+            onApplyRubricToGrading={(rubric) => {
+              setActiveRubric(rubric);
+              setToastMessage(`นำเกณฑ์ "${rubric.title}" มาใช้ตรวจงานเรียบร้อยแล้ว`);
+              setShowSheetsImporter(false);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Active Rubric Banner if loaded */}
+      {activeRubric && !showSheetsImporter && (
+        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 font-bold">
+            <span className="material-symbols-outlined text-emerald-600 text-[20px]">verified</span>
+            <span>กำลังใช้เกณฑ์ประเมิน: <b>{activeRubric.title}</b> ({activeRubric.criteria.length} เกณฑ์, เต็ม {activeRubric.totalMaxScore} คะแนน)</span>
+          </div>
+          <button
+            onClick={() => setActiveRubric(null)}
+            className="text-[11px] text-slate-500 hover:text-rose-600 font-semibold cursor-pointer underline"
+          >
+            ยกเลิกเกณฑ์นี้
+          </button>
+        </div>
+      )}
 
       {/* Submissions List */}
       <div className="space-y-4">
@@ -372,6 +423,34 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
               </div>
               <div className="font-mono text-blue-600">ไฟล์แนบ: {selectedSubmission.fileAttachment}</div>
             </div>
+
+            {/* Rubric Breakdown if active */}
+            {activeRubric && (
+              <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200 text-xs space-y-2">
+                <div className="flex items-center justify-between font-bold text-blue-900">
+                  <div className="flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[16px] text-blue-600">fact_check</span>
+                    <span>เกณฑ์ประเมิน: {activeRubric.title}</span>
+                  </div>
+                  <span className="text-[10px] bg-blue-200/80 text-blue-900 px-2 py-0.5 rounded-full font-extrabold">
+                    เต็ม {activeRubric.totalMaxScore} คะแนน
+                  </span>
+                </div>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  {activeRubric.criteria.map((crit, cIdx) => (
+                    <div key={cIdx} className="bg-white p-2 rounded-xl border border-blue-100 flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-bold text-slate-800 text-[11px]">{crit.name}</div>
+                        <div className="text-slate-500 text-[10px] line-clamp-1">{crit.description}</div>
+                      </div>
+                      <span className="font-bold text-blue-600 text-[11px] shrink-0">
+                        {crit.maxScore} คะแนน
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Score Input */}
             <div>
