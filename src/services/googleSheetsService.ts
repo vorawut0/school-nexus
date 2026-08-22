@@ -84,6 +84,317 @@ export interface ScheduleExportResult {
   createdAt: string;
 }
 
+/* =========================================================================
+   ERROR HANDLING AND CLASSIFICATION SYSTEM
+   ========================================================================= */
+
+export type GoogleSheetErrorType =
+  | 'INVALID_URL'
+  | 'PERMISSION_DENIED_PRIVATE'
+  | 'UNAUTHENTICATED'
+  | 'NOT_FOUND'
+  | 'TAB_NOT_FOUND'
+  | 'RATE_LIMIT'
+  | 'EMPTY_DATA'
+  | 'PARSING_ERROR'
+  | 'UNKNOWN';
+
+export interface GoogleSheetErrorInfo {
+  type: GoogleSheetErrorType;
+  title: string;
+  message: string;
+  statusCode?: number;
+  technicalDetails?: string;
+  spreadsheetId?: string;
+  spreadsheetUrl?: string;
+  actionableSteps: string[];
+  suggestedAction?: {
+    label: string;
+    icon: string;
+    actionType: 'sign_in' | 'create_template' | 'use_sample' | 'open_link' | 'retry' | 'change_tab';
+  };
+}
+
+/**
+ * Classifies raw API errors into structured, user-friendly, actionable feedback
+ */
+export function classifyGoogleSheetError(
+  error: any,
+  urlOrId?: string,
+  tabName?: string
+): GoogleSheetErrorInfo {
+  const cleanId = urlOrId ? extractSpreadsheetId(urlOrId) : '';
+  const rawMsg = error?.message || (typeof error === 'string' ? error : '') || 'Unknown error';
+  const statusMatch = rawMsg.match(/HTTP\s*(\d+)/i) || rawMsg.match(/code\s*:\s*(\d+)/i);
+  const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : undefined;
+  const sheetUrl = cleanId ? `https://docs.google.com/spreadsheets/d/${cleanId}` : undefined;
+
+  // 1. Invalid URL / Malformed ID
+  if (!urlOrId || !urlOrId.trim()) {
+    return {
+      type: 'INVALID_URL',
+      title: 'ยังไม่ได้ระบุลิงก์สเปรดชีต (No URL Provided)',
+      message: 'กรุณาวาง URL ของ Google Sheets หรือ Spreadsheet ID เพื่อดึงข้อมูลเข้าสู่ระบบ',
+      spreadsheetId: cleanId,
+      actionableSteps: [
+        'คัดลอก URL สเปรดชีตจากเบราว์เซอร์ (เช่น https://docs.google.com/spreadsheets/d/.../edit)',
+        'หรือคลิกปุ่ม "ใส่ URL ตัวอย่าง" หรือ "สร้าง Rubric แม่แบบ" เพื่อทดสอบระบบได้ทันที',
+      ],
+      suggestedAction: {
+        label: 'ใส่ลิงก์ตัวอย่างเพื่อทดลองใช้งาน',
+        icon: 'playlist_add_check',
+        actionType: 'use_sample',
+      },
+    };
+  }
+
+  const trimmed = urlOrId.trim();
+  const isGoogleDoc = trimmed.includes('docs.google.com/document');
+  const isGoogleForm = trimmed.includes('docs.google.com/forms');
+  const isGoogleSlide = trimmed.includes('docs.google.com/presentation');
+  const isGoogleDriveFolder = trimmed.includes('drive.google.com/drive/folders');
+
+  if (isGoogleDoc || isGoogleForm || isGoogleSlide || isGoogleDriveFolder) {
+    let serviceName = 'Google Docs (เอกสารข้อความ)';
+    if (isGoogleForm) serviceName = 'Google Forms (แบบสอบถาม)';
+    if (isGoogleSlide) serviceName = 'Google Slides (งานนำเสนอ)';
+    if (isGoogleDriveFolder) serviceName = 'Google Drive โฟลเดอร์';
+
+    return {
+      type: 'INVALID_URL',
+      title: 'ประเภทไฟล์ไม่ถูกต้อง (Invalid Document Type)',
+      message: `ลิงก์ที่ระบุคือ ${serviceName} ซึ่งไม่ใช่ Google Sheets (สเปรดชีตตารางคำนวณ)`,
+      technicalDetails: `Detected URL pattern: ${trimmed}`,
+      spreadsheetId: cleanId,
+      actionableSteps: [
+        'ระบบนี้รองรับเฉพาะ Google Sheets (URL ต้องมี /spreadsheets/d/...)',
+        'หากต้องการใช้ข้อมูลจากไฟล์นี้ ให้คัดลอกเนื้อหาหรือสร้างเป็น Google Sheets สเปรดชีตก่อน',
+        'หรือกดปุ่ม "สร้าง Rubric แม่แบบ" เพื่อให้ระบบสร้างไฟล์ Google Sheets ให้อัตโนมัติ',
+      ],
+      suggestedAction: {
+        label: 'สร้างสเปรดชีต Google Sheets แม่แบบใหม่',
+        icon: 'add_box',
+        actionType: 'create_template',
+      },
+    };
+  }
+
+  if (trimmed.startsWith('http') && !trimmed.includes('docs.google.com/spreadsheets')) {
+    return {
+      type: 'INVALID_URL',
+      title: 'ลิงก์สเปรดชีตไม่ถูกต้อง (Invalid Spreadsheet URL)',
+      message: 'URL ที่คุณระบุไม่ใช่ลิงก์ Google Sheets ที่ถูกต้อง',
+      technicalDetails: `URL: ${trimmed}`,
+      spreadsheetId: cleanId,
+      actionableSteps: [
+        'ตรวจสอบว่า URL เริ่มต้นด้วย https://docs.google.com/spreadsheets/d/...',
+        'ตรวจสอบว่าคัดลอกลิงก์มาครบถ้วน ไม่ตกหล่นตัวอักษร',
+        'หรือระบุเฉพาะ Spreadsheet ID (เช่น 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms)',
+      ],
+      suggestedAction: {
+        label: 'ใส่ลิงก์ตัวอย่างเพื่อทดสอบ',
+        icon: 'playlist_add_check',
+        actionType: 'use_sample',
+      },
+    };
+  }
+
+  // 2. Unauthenticated / Token Expired
+  if (
+    rawMsg.includes('NO_TOKEN') ||
+    rawMsg.includes('UNAUTHENTICATED') ||
+    rawMsg.includes('Invalid Credentials') ||
+    rawMsg.includes('401') ||
+    statusCode === 401
+  ) {
+    return {
+      type: 'UNAUTHENTICATED',
+      title: 'ต้องเชื่อมต่อบัญชี Google (Google Authentication Required)',
+      message: 'จำเป็นต้องยืนยันตัวตนด้วยบัญชี Google เพื่อขอสิทธิ์การเข้าถึง Google Sheets API',
+      statusCode: 401,
+      technicalDetails: rawMsg,
+      spreadsheetId: cleanId,
+      spreadsheetUrl: sheetUrl,
+      actionableSteps: [
+        'คลิกปุ่ม "เชื่อมต่อ Google (Sign in with Google)" ด้านล่าง',
+        'เลือกบัญชี Google ที่คุณต้องการใช้งานหรือเป็นเจ้าของไฟล์สเปรดชีตนี้',
+        'ยินยอมสิทธิ์การเข้าถึง Google Sheets เพื่อให้ระบบสามารถอ่านและเขียนข้อมูลได้',
+      ],
+      suggestedAction: {
+        label: 'เชื่อมต่อบัญชี Google ทันที',
+        icon: 'account_circle',
+        actionType: 'sign_in',
+      },
+    };
+  }
+
+  // 3. Permission Denied / Private Sheet (403)
+  if (
+    rawMsg.includes('PERMISSION_DENIED') ||
+    rawMsg.includes('The caller does not have permission') ||
+    rawMsg.includes('caller does not have permission') ||
+    rawMsg.includes('Access Not Configured') ||
+    rawMsg.includes('403') ||
+    statusCode === 403
+  ) {
+    return {
+      type: 'PERMISSION_DENIED_PRIVATE',
+      title: 'ไม่มีสิทธิ์เข้าถึงไฟล์ (Private Spreadsheet / Permission Denied)',
+      message: 'สเปรดชีตนี้ถูกตั้งค่าเป็นส่วนตัว (Private) หรือไม่ได้เปิดสิทธิ์ให้บัญชี Google ของคุณเข้าถึง',
+      statusCode: 403,
+      technicalDetails: rawMsg,
+      spreadsheetId: cleanId,
+      spreadsheetUrl: sheetUrl,
+      actionableSteps: [
+        'เปิดไฟล์สเปรดชีตของคุณใน Google Sheets',
+        'กดปุ่ม "แชร์" (Share) ที่มุมขวาบนของหน้าสเปรดชีต',
+        'ในส่วน "การเข้าถึงทั่วไป" (General access) เปลี่ยนจาก "จำกัด" (Restricted) เป็น "ทุกคนที่มีลิงก์มีสิทธิ์อ่าน" (Anyone with the link can view)',
+        'หรือเพิ่มสิทธิ์ให้อีเมล Google ที่คุณกำลังเข้าสู่ระบบในแอปนี้',
+        'เมื่อตั้งค่าเสร็จแล้ว กดปุ่ม "ลองใหม่อีกครั้ง" (Retry) ด้านล่าง',
+      ],
+      suggestedAction: {
+        label: 'เปิดสเปรดชีตใน Google Sheets เพื่อตั้งค่าสิทธิ์แชร์',
+        icon: 'open_in_new',
+        actionType: 'open_link',
+      },
+    };
+  }
+
+  // 4. Not Found / Deleted (404)
+  if (
+    rawMsg.includes('NOT_FOUND') ||
+    rawMsg.includes('Requested entity was not found') ||
+    rawMsg.includes('does not exist') ||
+    rawMsg.includes('404') ||
+    statusCode === 404
+  ) {
+    return {
+      type: 'NOT_FOUND',
+      title: 'ไม่พบไฟล์สเปรดชีต (Spreadsheet Not Found)',
+      message: `ไม่พบสเปรดชีตที่มี ID "${cleanId || 'ไม่ระบุ'}" อาจถูกลบ ย้ายไปถังขยะ หรือระบุ Spreadsheet ID ไม่ถูกต้อง`,
+      statusCode: 404,
+      technicalDetails: rawMsg,
+      spreadsheetId: cleanId,
+      actionableSteps: [
+        'ตรวจสอบว่าไฟล์สเปรดชีตยังคงอยู่ใน Google Drive หรือไม่',
+        'ตรวจสอบว่าไม่ได้เผลอลบตัวอักษรบางตัวใน URL หรือ Spreadsheet ID',
+        'เปิดไฟล์ใน Google Sheets แล้วคัดลอก URL ล่าสุดมาวางใหม่อีกครั้ง',
+        'หรือสร้างสเปรดชีตใหม่ด้วยปุ่ม "สร้าง Rubric แม่แบบ"',
+      ],
+      suggestedAction: {
+        label: 'สร้างสเปรดชีตแม่แบบใหม่ลง Drive ทันที',
+        icon: 'add_box',
+        actionType: 'create_template',
+      },
+    };
+  }
+
+  // 5. Tab / Range Not Found
+  if (
+    rawMsg.includes('Unable to parse range') ||
+    rawMsg.includes('Sheet tab') ||
+    rawMsg.includes('แท็บ') ||
+    rawMsg.includes('not found in spreadsheet')
+  ) {
+    return {
+      type: 'TAB_NOT_FOUND',
+      title: 'ไม่พบแท็บชีตที่ระบุ (Sheet Tab Not Found)',
+      message: tabName
+        ? `ไม่พบแท็บชีตชื่อ "${tabName}" ในไฟล์สเปรดชีตนี้`
+        : 'ไม่พบช่วงข้อมูลหรือชื่อแท็บที่ต้องการในสเปรดชีต',
+      technicalDetails: rawMsg,
+      spreadsheetId: cleanId,
+      spreadsheetUrl: sheetUrl,
+      actionableSteps: [
+        'ตรวจสอบชื่อแท็บด้านล่างของ Google Sheets (เช่น Sheet1, เกณฑ์การประเมิน, ตารางสอน)',
+        'เลือกแท็บที่ถูกต้องจากเมนูดรอปดาวน์ "แท็บชีต"',
+        'หรือตรวจสอบว่าชื่อแท็บไม่มีการเว้นวรรคหรือพิมพ์สะกดผิด',
+      ],
+      suggestedAction: {
+        label: 'เลือกแท็บแรกของไฟล์และลองใหม่',
+        icon: 'tab',
+        actionType: 'change_tab',
+      },
+    };
+  }
+
+  // 6. Rate Limit / Quota Exceeded (429)
+  if (
+    rawMsg.includes('RESOURCE_EXHAUSTED') ||
+    rawMsg.includes('Rate Limit') ||
+    rawMsg.includes('429') ||
+    statusCode === 429
+  ) {
+    return {
+      type: 'RATE_LIMIT',
+      title: 'เรียกใช้งาน API ถี่เกินไป (Rate Limit Exceeded)',
+      message: 'Google Sheets API มีการเรียกใช้งานเกินโควตาชั่วคราว กรุณารอประมาณ 30-60 วินาที',
+      statusCode: 429,
+      technicalDetails: rawMsg,
+      spreadsheetId: cleanId,
+      spreadsheetUrl: sheetUrl,
+      actionableSteps: [
+        'รอประมาณ 30 วินาทีโดยไม่ต้องกดปุ่มส่งข้อมูลซ้ำๆ',
+        'กดปุ่ม "ลองใหม่อีกครั้ง" เมื่อครบเวลา',
+      ],
+      suggestedAction: {
+        label: 'ลองใหม่อีกครั้ง',
+        icon: 'refresh',
+        actionType: 'retry',
+      },
+    };
+  }
+
+  // 7. Empty Data or Missing Columns
+  if (
+    rawMsg.includes('ไม่พบข้อมูล') ||
+    rawMsg.includes('ไม่มีข้อมูล') ||
+    rawMsg.includes('empty') ||
+    rawMsg.includes('ไม่มีหัวตาราง')
+  ) {
+    return {
+      type: 'EMPTY_DATA',
+      title: 'ไม่พบข้อมูลหรือโครงสร้างตารางไม่ถูกต้อง (Empty or Invalid Data)',
+      message: 'สเปรดชีตนี้ว่างเปล่า หรือหัวคอลัมน์ไม่ตรงตามรูปแบบเกณฑ์ Rubric หรือตารางสอน',
+      technicalDetails: rawMsg,
+      spreadsheetId: cleanId,
+      spreadsheetUrl: sheetUrl,
+      actionableSteps: [
+        'ตรวจสอบว่ามีข้อมูลในแถวที่ 1 เป็นต้นไปหรือไม่',
+        'สำหรับเกณฑ์ Rubric: ต้องมีคอลัมน์ชื่อเกณฑ์, คำอธิบาย, และคะแนนเต็ม',
+        'สำหรับตารางสอน: ต้องมีคอลัมน์วัน, เวลา, รหัสวิชา, ชื่อวิชา, ห้องเรียน',
+        'สามารถกด "สร้าง Rubric แม่แบบ" เพื่อดูโครงสร้างตารางตัวอย่าง',
+      ],
+      suggestedAction: {
+        label: 'สร้างสเปรดชีตตัวอย่างที่มีโครงสร้างถูกต้อง',
+        icon: 'auto_fix_high',
+        actionType: 'create_template',
+      },
+    };
+  }
+
+  // 8. Unknown / Generic Fallback
+  return {
+    type: 'UNKNOWN',
+    title: 'เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets',
+    message: rawMsg || 'ไม่สามารถติดต่อ Google Sheets API ได้ในขณะนี้',
+    statusCode,
+    technicalDetails: rawMsg,
+    spreadsheetId: cleanId,
+    spreadsheetUrl: sheetUrl,
+    actionableSteps: [
+      'ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต',
+      'ตรวจสอบว่า URL ของ Google Sheets ถูกต้องและสามารถเปิดได้ในเบราว์เซอร์',
+      'ลองกดปุ่ม "เชื่อมต่อ Google" อีกครั้งเพื่อรีเฟรชโทเค็นสิทธิ์การเข้าถึง',
+    ],
+    suggestedAction: {
+      label: 'ลองเชื่อมต่อ Google ใหม่อีกครั้ง',
+      icon: 'sync',
+      actionType: 'sign_in',
+    },
+  };
+}
+
 // In-memory token cache (Do NOT store in localStorage or sessionStorage per security guidelines)
 let cachedAccessToken: string | null = null;
 let isSigningIn = false;
@@ -1049,5 +1360,107 @@ export async function exportAttendanceToGoogleSheet(
     exportedRowsCount: attendanceList.length,
     createdAt: new Date().toISOString(),
   };
+}
+
+/* =========================================================================
+   60-SECOND POLLING & CHANGE DETECTION UTILITIES
+   ========================================================================= */
+
+/**
+ * Fast data hash algorithm for change detection
+ */
+export function computeDataHash(data: any): string {
+  try {
+    const str = typeof data === 'string' ? data : JSON.stringify(data);
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash |= 0;
+    }
+    return `${hash}_${str.length}`;
+  } catch {
+    return `${Date.now()}`;
+  }
+}
+
+export interface SheetPollResult {
+  hasChanged: boolean;
+  previousHash?: string;
+  newHash: string;
+  rowCount: number;
+  timestamp: string;
+  sheetTitle?: string;
+  data?: any;
+  error?: string;
+}
+
+/**
+ * Poll a spreadsheet to detect if remote content has been modified
+ */
+export async function pollSpreadsheetForChanges(
+  spreadsheetId: string,
+  lastKnownHash?: string,
+  tabName?: string,
+  mode: 'rubric' | 'schedule' | 'raw' = 'raw'
+): Promise<SheetPollResult> {
+  const cleanId = extractSpreadsheetId(spreadsheetId);
+  if (!cleanId) {
+    throw new Error('Spreadsheet ID is missing or invalid');
+  }
+
+  try {
+    if (mode === 'rubric') {
+      const rubric = await fetchRubricFromSheet(cleanId, tabName);
+      const newHash = computeDataHash(rubric);
+      return {
+        hasChanged: lastKnownHash ? lastKnownHash !== newHash : false,
+        previousHash: lastKnownHash,
+        newHash,
+        rowCount: rubric.criteria?.length || 0,
+        timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        sheetTitle: rubric.title,
+        data: rubric,
+      };
+    }
+
+    if (mode === 'schedule') {
+      const schedule = await importScheduleFromSpreadsheet(cleanId, tabName);
+      const totalRows = schedule.reduce((acc, d) => acc + d.items.length, 0);
+      const newHash = computeDataHash(schedule);
+      return {
+        hasChanged: lastKnownHash ? lastKnownHash !== newHash : false,
+        previousHash: lastKnownHash,
+        newHash,
+        rowCount: totalRows,
+        timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        sheetTitle: `ตารางสอน (${totalRows} คาบ)`,
+        data: schedule,
+      };
+    }
+
+    // Default: Raw or general range check
+    const range = tabName ? `'${tabName}'!A1:Z100` : 'A1:Z100';
+    const rawValues = await readSheetRange(cleanId, range);
+    const newHash = computeDataHash(rawValues);
+    return {
+      hasChanged: lastKnownHash ? lastKnownHash !== newHash : false,
+      previousHash: lastKnownHash,
+      newHash,
+      rowCount: rawValues.length,
+      timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      sheetTitle: `สเปรดชีต (${rawValues.length} แถว)`,
+      data: rawValues,
+    };
+  } catch (err: any) {
+    return {
+      hasChanged: false,
+      previousHash: lastKnownHash,
+      newHash: lastKnownHash || '',
+      rowCount: 0,
+      timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      error: err.message || 'Polling error',
+    };
+  }
 }
 

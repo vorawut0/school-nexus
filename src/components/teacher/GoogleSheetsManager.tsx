@@ -17,16 +17,22 @@ import {
   deleteGoogleSheetConnectionFromFirestore,
   exportFirestoreGradesToGoogleSheet,
   exportAttendanceToGoogleSheet,
+  classifyGoogleSheetError,
+  GoogleSheetErrorInfo,
   AssignmentRubric,
   GoogleSheetMetadata,
   GoogleSheetConnection,
 } from '../../services/googleSheetsService';
 import { WEEKLY_TEACHER_SCHEDULE } from '../../data/mockData';
+import { GoogleSheetErrorCard } from './GoogleSheetErrorCard';
+import { GoogleSheetSyncIndicator } from './GoogleSheetSyncIndicator';
+import { SheetPollResult } from '../../services/googleSheetsService';
 
 interface GoogleSheetsManagerProps {
   user: UserProfile;
   onApplyRubricToGrading?: (rubric: AssignmentRubric) => void;
   onScheduleImported?: (scheduleDays: { dayName: string; items: ScheduleItem[] }[]) => void;
+  onActiveSheetChanged?: (url: string) => void;
   className?: string;
 }
 
@@ -42,6 +48,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   user,
   onApplyRubricToGrading,
   onScheduleImported,
+  onActiveSheetChanged,
   className = '',
 }) => {
   const [sheetUrl, setSheetUrl] = useState<string>('');
@@ -53,7 +60,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorInfo, setErrorInfo] = useState<GoogleSheetErrorInfo | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
   // Loaded data state
@@ -61,6 +68,34 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const [loadedSchedule, setLoadedSchedule] = useState<{ dayName: string; items: ScheduleItem[] }[] | null>(null);
   const [loadedRawData, setLoadedRawData] = useState<{ header: string[]; rows: any[][] } | null>(null);
   const [metadata, setMetadata] = useState<GoogleSheetMetadata | null>(null);
+
+  // Notify parent on active sheet change
+  const handleUpdateSheetUrl = (newUrl: string) => {
+    setSheetUrl(newUrl);
+    onActiveSheetChanged?.(newUrl);
+  };
+
+  // Handle updates detected by 60s Poller
+  const handlePollUpdateDetected = (result: SheetPollResult) => {
+    if (selectedMode === 'rubric' && result.data?.criteria) {
+      setLoadedRubric(result.data);
+      if (onApplyRubricToGrading) {
+        onApplyRubricToGrading(result.data);
+      }
+      showNotification(`⚡ ตรวจพบการแก้ไขใน Google Sheets! อัปเดตเกณฑ์ Rubric (${result.data.title}) แล้ว`);
+    } else if (selectedMode === 'schedule' && Array.isArray(result.data)) {
+      setLoadedSchedule(result.data);
+      if (onScheduleImported) {
+        onScheduleImported(result.data);
+      }
+      showNotification(`⚡ ตรวจพบการแก้ไขใน Google Sheets! อัปเดตตารางสอนเรียบร้อยแล้ว`);
+    } else if (selectedMode === 'raw' && Array.isArray(result.data) && result.data.length > 0) {
+      const header = result.data[0]?.map((c: any) => String(c || '')) || [];
+      const rows = result.data.slice(1);
+      setLoadedRawData({ header, rows });
+      showNotification(`⚡ ตรวจพบการแก้ไขใน Google Sheets! อัปเดตตาราง (${rows.length} แถว) แล้ว`);
+    }
+  };
 
   // Firestore Realtime Subscriptions
   const [savedFirestoreRubrics, setSavedFirestoreRubrics] = useState<AssignmentRubric[]>([]);
@@ -101,13 +136,14 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const handleGoogleSignIn = async () => {
     try {
       setIsAuthenticating(true);
-      setErrorMessage(null);
+      setErrorInfo(null);
       await signInWithGoogleSheets();
       setIsAuthenticated(true);
       showNotification('เชื่อมต่อบัญชี Google Workspace สำเร็จแล้ว!');
     } catch (err: any) {
       console.error('Google Sign-In failed:', err);
-      setErrorMessage(err.message || 'ไม่สามารถเชื่อมต่อ Google Workspace ได้');
+      const classified = classifyGoogleSheetError(err, sheetUrl, selectedTabName);
+      setErrorInfo(classified);
     } finally {
       setIsAuthenticating(false);
     }
@@ -126,7 +162,8 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       if (tabNames.length > 0 && !selectedTabName) {
         setSelectedTabName(tabNames[0]);
       }
-    } catch (err) {
+      setErrorInfo(null);
+    } catch (err: any) {
       console.debug('Failed to pre-fetch metadata:', err);
     }
   };
@@ -135,17 +172,18 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const handleFetchData = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!sheetUrl.trim()) {
-      setErrorMessage('กรุณาระบุ Google Sheet URL หรือ Spreadsheet ID');
+      const err = classifyGoogleSheetError(new Error('NO_URL'), '');
+      setErrorInfo(err);
       return;
     }
 
     setIsLoading(true);
-    setErrorMessage(null);
+    setErrorInfo(null);
 
     try {
       const cleanId = extractSpreadsheetId(sheetUrl);
       if (!cleanId) {
-        throw new Error('รูปแบบ URL ของ Google Sheets ไม่ถูกต้อง');
+        throw new Error('รูปแบบ URL ของ Google Sheets ไม่ถูกต้อง กรุณาตรวจสอบลิงก์อีกครั้ง');
       }
 
       // 1. Fetch metadata
@@ -155,8 +193,11 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
         setMetadata(currentMeta);
         const tabs = currentMeta.sheets.map((s) => s.title);
         setAvailableTabs(tabs);
-      } catch {
-        // Continue
+      } catch (metaErr: any) {
+        // If metadata fails with 403 or 404 or 401, bubble up immediately
+        if (metaErr.message?.includes('403') || metaErr.message?.includes('PERMISSION_DENIED') || metaErr.message?.includes('404') || metaErr.message?.includes('401')) {
+          throw metaErr;
+        }
       }
 
       // 2. Fetch specific mode data
@@ -211,12 +252,8 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       }
     } catch (err: any) {
       console.error('Fetch Google Sheets failed:', err);
-      const isAuthError = err.message?.includes('NO_TOKEN') || err.message?.includes('401') || err.message?.includes('Google');
-      if (isAuthError && !isAuthenticated) {
-        setErrorMessage('กรุณากดปุ่ม "เชื่อมต่อ Google" เพื่ออนุญาตสิทธิ์เข้าถึง Google Sheets');
-      } else {
-        setErrorMessage(err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets');
-      }
+      const classified = classifyGoogleSheetError(err, sheetUrl, selectedTabName);
+      setErrorInfo(classified);
     } finally {
       setIsLoading(false);
     }
@@ -226,7 +263,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const handleCreateRubricTemplate = async () => {
     try {
       setIsLoading(true);
-      setErrorMessage(null);
+      setErrorInfo(null);
       const sampleCriteria = [
         {
           id: 'c-1',
@@ -298,7 +335,8 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       showNotification(`สร้างสเปรดชีตบน Google Drive และซิงค์เข้า Firebase Firestore สำเร็จ!`);
     } catch (err: any) {
       console.error('Create rubric template error:', err);
-      setErrorMessage(err.message || 'ไม่สามารถสร้างสเปรดชีตแม่แบบเกณฑ์ประเมินได้');
+      const classified = classifyGoogleSheetError(err, sheetUrl, selectedTabName);
+      setErrorInfo(classified);
     } finally {
       setIsLoading(false);
     }
@@ -308,7 +346,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const handleExportScheduleToSheets = async () => {
     try {
       setIsLoading(true);
-      setErrorMessage(null);
+      setErrorInfo(null);
       const scheduleDays = [
         { dayName: 'วันจันทร์', dayId: 'mon', items: WEEKLY_TEACHER_SCHEDULE.mon },
         { dayName: 'วันอังคาร', dayId: 'tue', items: WEEKLY_TEACHER_SCHEDULE.tue },
@@ -332,7 +370,8 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       showNotification(`ส่งออกตารางสอนไปยัง Google Sheets (${res.exportedRowsCount} คาบ) และบันทึกลง Firebase แล้ว!`);
     } catch (err: any) {
       console.error('Export schedule error:', err);
-      setErrorMessage(err.message || 'ไม่สามารถส่งออกตารางสอนไปยัง Google Sheets ได้');
+      const classified = classifyGoogleSheetError(err, sheetUrl, selectedTabName);
+      setErrorInfo(classified);
     } finally {
       setIsLoading(false);
     }
@@ -342,7 +381,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const handleExportGradesFromFirestore = async () => {
     try {
       setIsLoading(true);
-      setErrorMessage(null);
+      setErrorInfo(null);
 
       const mockSubmissions = [
         { studentId: 'STD-6701', studentName: 'สมชาย ใจดี', score: 28, maxScore: 30, feedback: 'วิเคราะห์ได้ดีมาก ครบถ้วนทุกประเด็น', status: 'graded', submittedAt: '22 ส.ค. 09:30' },
@@ -361,7 +400,8 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       showNotification(`ส่งออกคะแนนเก็บจาก Firestore ไปยัง Google Sheets (${res.exportedRowsCount} รายการ) สำเร็จ!`);
     } catch (err: any) {
       console.error('Export grades error:', err);
-      setErrorMessage(err.message || 'ไม่สามารถส่งออกคะแนนไปยัง Google Sheets ได้');
+      const classified = classifyGoogleSheetError(err, sheetUrl, selectedTabName);
+      setErrorInfo(classified);
     } finally {
       setIsLoading(false);
     }
@@ -371,7 +411,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
   const handleExportAttendanceFromFirestore = async () => {
     try {
       setIsLoading(true);
-      setErrorMessage(null);
+      setErrorInfo(null);
 
       const mockAttendance = [
         { studentId: 'STD-6701', studentName: 'สมชาย ใจดี', status: 'present' as const, checkInTime: '08:15', note: 'สแกน QR หน้าห้อง' },
@@ -392,7 +432,8 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       showNotification(`ส่งออกบันทึกเวลาเรียนจาก Firestore ไปยัง Google Sheets สำเร็จ!`);
     } catch (err: any) {
       console.error('Export attendance error:', err);
-      setErrorMessage(err.message || 'ไม่สามารถส่งออกข้อมูลเช็กชื่อไปยัง Google Sheets ได้');
+      const classified = classifyGoogleSheetError(err, sheetUrl, selectedTabName);
+      setErrorInfo(classified);
     } finally {
       setIsLoading(false);
     }
@@ -411,7 +452,8 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
       await deleteGoogleSheetConnectionFromFirestore(id);
       showNotification('ลบการเชื่อมต่อสเปรดชีตแล้ว');
     } catch (err: any) {
-      setErrorMessage(err.message || 'ไม่สามารถลบการเชื่อมต่อได้');
+      const classified = classifyGoogleSheetError(err);
+      setErrorInfo(classified);
     }
   };
 
@@ -430,6 +472,12 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
           : true
       )
     : [];
+
+  // Client-side quick check for non-sheet docs
+  const isNonSheetLink =
+    sheetUrl.includes('docs.google.com/document') ||
+    sheetUrl.includes('docs.google.com/forms') ||
+    sheetUrl.includes('docs.google.com/presentation');
 
   return (
     <div className={`bg-white rounded-3xl p-5 sm:p-7 border border-slate-200 shadow-sm transition-all ${className}`}>
@@ -539,7 +587,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
           <button
             onClick={() => {
               setSelectedMode('rubric');
-              setErrorMessage(null);
+              setErrorInfo(null);
             }}
             className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               selectedMode === 'rubric'
@@ -554,7 +602,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
           <button
             onClick={() => {
               setSelectedMode('schedule');
-              setErrorMessage(null);
+              setErrorInfo(null);
             }}
             className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               selectedMode === 'schedule'
@@ -569,7 +617,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
           <button
             onClick={() => {
               setSelectedMode('grades_attendance');
-              setErrorMessage(null);
+              setErrorInfo(null);
             }}
             className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               selectedMode === 'grades_attendance'
@@ -584,7 +632,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
           <button
             onClick={() => {
               setSelectedMode('linked_sheets');
-              setErrorMessage(null);
+              setErrorInfo(null);
             }}
             className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               selectedMode === 'linked_sheets'
@@ -599,7 +647,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
           <button
             onClick={() => {
               setSelectedMode('raw');
-              setErrorMessage(null);
+              setErrorInfo(null);
             }}
             className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
               selectedMode === 'raw'
@@ -612,7 +660,7 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
           </button>
         </div>
 
-        {/* Auto Sync Toggle & Sample URL */}
+        {/* Auto Sync Toggle */}
         <div className="flex items-center gap-3 text-xs">
           <label className="flex items-center gap-1.5 text-slate-700 font-semibold cursor-pointer select-none">
             <input
@@ -628,99 +676,175 @@ export const GoogleSheetsManager: React.FC<GoogleSheetsManagerProps> = ({
 
       {/* URL Input Form (for rubric, schedule, and raw modes) */}
       {(selectedMode === 'rubric' || selectedMode === 'schedule' || selectedMode === 'raw') && (
-        <form onSubmit={handleFetchData} className="mt-4 space-y-3">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            <div className="relative flex-1">
-              <span className="absolute left-3.5 top-3 text-slate-400 material-symbols-outlined text-[18px]">
-                link
-              </span>
-              <input
-                type="text"
-                value={sheetUrl}
-                onChange={(e) => {
-                  setSheetUrl(e.target.value);
-                  handleInspectMetadata(e.target.value);
-                }}
-                placeholder="วาง Google Sheets URL (เช่น https://docs.google.com/spreadsheets/d/.../edit) หรือ Spreadsheet ID"
-                className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 border border-slate-300 focus:border-blue-500 focus:bg-white text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all"
-              />
-              {sheetUrl && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSheetUrl('');
-                    setMetadata(null);
-                    setAvailableTabs([]);
-                    setLoadedRubric(null);
-                    setLoadedSchedule(null);
-                    setLoadedRawData(null);
+        <div className="mt-4 space-y-3">
+          <form onSubmit={handleFetchData}>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              <div className="relative flex-1">
+                <span className="absolute left-3.5 top-3 text-slate-400 material-symbols-outlined text-[18px]">
+                  link
+                </span>
+                <input
+                  type="text"
+                  value={sheetUrl}
+                  onChange={(e) => {
+                    setSheetUrl(e.target.value);
+                    handleInspectMetadata(e.target.value);
                   }}
-                  className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  placeholder="วาง Google Sheets URL (เช่น https://docs.google.com/spreadsheets/d/.../edit) หรือ Spreadsheet ID"
+                  className={`w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 border text-xs sm:text-sm font-medium text-slate-900 outline-none transition-all ${
+                    isNonSheetLink
+                      ? 'border-amber-400 bg-amber-50/40 focus:border-amber-500'
+                      : 'border-slate-300 focus:border-blue-500 focus:bg-white'
+                  }`}
+                />
+                {sheetUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSheetUrl('');
+                      setMetadata(null);
+                      setAvailableTabs([]);
+                      setLoadedRubric(null);
+                      setLoadedSchedule(null);
+                      setLoadedRawData(null);
+                      setErrorInfo(null);
+                    }}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Sheet Tab Picker if metadata discovered */}
+              {availableTabs.length > 0 && (
+                <select
+                  value={selectedTabName}
+                  onChange={(e) => {
+                    setSelectedTabName(e.target.value);
+                    setErrorInfo(null);
+                  }}
+                  className="py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 outline-none focus:border-blue-500 cursor-pointer"
                 >
-                  ✕
-                </button>
+                  {availableTabs.map((tab) => (
+                    <option key={tab} value={tab}>
+                      แท็บ: {tab}
+                    </option>
+                  ))}
+                </select>
               )}
+
+              {/* Fetch Data Button */}
+              <button
+                type="submit"
+                disabled={isLoading || !sheetUrl.trim()}
+                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {isLoading ? (
+                  <>
+                    <span className="material-symbols-outlined text-[18px] animate-spin">refresh</span>
+                    <span>กำลังดึงข้อมูล...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[18px]">sync</span>
+                    <span>ดึงข้อมูล & บันทึกลงคลาวด์</span>
+                  </>
+                )}
+              </button>
             </div>
 
-            {/* Sheet Tab Picker if metadata discovered */}
-            {availableTabs.length > 0 && (
-              <select
-                value={selectedTabName}
-                onChange={(e) => setSelectedTabName(e.target.value)}
-                className="py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 outline-none focus:border-blue-500 cursor-pointer"
-              >
-                {availableTabs.map((tab) => (
-                  <option key={tab} value={tab}>
-                    แท็บ: {tab}
-                  </option>
-                ))}
-              </select>
+            {/* Inline warning for Docs/Forms links */}
+            {isNonSheetLink && (
+              <div className="mt-2 text-[11px] text-amber-800 flex items-center gap-1.5 font-medium bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
+                <span className="material-symbols-outlined text-[15px] text-amber-600 shrink-0">info</span>
+                <span>
+                  ลิงก์ที่วางดูเหมือนเป็น Google Docs หรือ Forms — กรุณาใช้ลิงก์สเปรดชีต (Google Sheets) เพื่อดึงข้อมูลตาราง
+                </span>
+              </div>
             )}
 
-            {/* Fetch Data Button */}
-            <button
-              type="submit"
-              disabled={isLoading || !sheetUrl.trim()}
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-50 shrink-0"
-            >
-              {isLoading ? (
-                <>
-                  <span className="material-symbols-outlined text-[18px] animate-spin">refresh</span>
-                  <span>กำลังดึงข้อมูล...</span>
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-[18px]">sync</span>
-                  <span>ดึงข้อมูล & บันทึกลงคลาวด์</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* Error message banner */}
-          {errorMessage && (
-            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start justify-between gap-3 animate-fadeIn">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-rose-600 text-[18px] shrink-0">error</span>
-                <span>{errorMessage}</span>
-              </div>
-              {!isAuthenticated && (
-                <button
-                  type="button"
-                  onClick={handleGoogleSignIn}
-                  className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] shrink-0 cursor-pointer"
-                >
-                  เข้าสู่ระบบ Google ทันที
-                </button>
-              )}
+            {/* Quick Test Sample Helpers */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+              <span className="font-semibold flex items-center gap-1 text-slate-600">
+                <span className="material-symbols-outlined text-[14px] text-blue-500">lightbulb</span>
+                ทดลองคลิกลิงก์ตัวอย่าง:
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  handleUpdateSheetUrl(SAMPLE_URLS.rubric);
+                  setSelectedMode('rubric');
+                  setErrorInfo(null);
+                  handleInspectMetadata(SAMPLE_URLS.rubric);
+                }}
+                className="px-2 py-0.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold border border-blue-200 transition-all cursor-pointer"
+              >
+                แม่แบบเกณฑ์ Rubric
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleUpdateSheetUrl(SAMPLE_URLS.schedule);
+                  setSelectedMode('schedule');
+                  setErrorInfo(null);
+                  handleInspectMetadata(SAMPLE_URLS.schedule);
+                }}
+                className="px-2 py-0.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold border border-purple-200 transition-all cursor-pointer"
+              >
+                แม่แบบตารางสอน
+              </button>
             </div>
+          </form>
+
+          {/* 60-Second Polling & Sync Status Indicator */}
+          {sheetUrl && (
+            <GoogleSheetSyncIndicator
+              spreadsheetUrlOrId={sheetUrl}
+              tabName={selectedTabName}
+              mode={selectedMode === 'rubric' || selectedMode === 'schedule' ? selectedMode : 'raw'}
+              isAutoPollEnabled={true}
+              pollIntervalSeconds={60}
+              onUpdateDetected={handlePollUpdateDetected}
+              onManualSyncTriggered={() => handleFetchData()}
+              variant="full"
+              className="mt-3"
+            />
           )}
-        </form>
+
+          {/* =========================================================================
+              ROBUST ACTIONABLE ERROR HANDLING UI
+              ========================================================================= */}
+          {errorInfo && (
+            <GoogleSheetErrorCard
+              error={errorInfo}
+              onDismiss={() => setErrorInfo(null)}
+              onSignIn={handleGoogleSignIn}
+              onCreateTemplate={handleCreateRubricTemplate}
+              onUseSample={() => {
+                const targetUrl = selectedMode === 'schedule' ? SAMPLE_URLS.schedule : SAMPLE_URLS.rubric;
+                setSheetUrl(targetUrl);
+                setErrorInfo(null);
+                handleInspectMetadata(targetUrl);
+              }}
+              onRetry={() => handleFetchData()}
+              onChangeTab={() => {
+                if (availableTabs.length > 0) {
+                  setSelectedTabName(availableTabs[0]);
+                  setErrorInfo(null);
+                  setTimeout(() => handleFetchData(), 100);
+                }
+              }}
+              className="mt-3"
+            />
+          )}
+        </div>
       )}
 
       {/* =========================================================================
           TAB 1: RUBRIC DATA TABLE & FIRESTORE SAVED RUBRICS
           ========================================================================= */}
+
       {selectedMode === 'rubric' && (
         <div className="mt-6 space-y-6">
           {loadedRubric && (

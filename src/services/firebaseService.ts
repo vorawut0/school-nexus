@@ -624,7 +624,6 @@ export async function registerNewUser(data: RegisterUserData): Promise<{ success
           generatedUid = userCredential.user.uid;
         }
       } catch (authErr: any) {
-        console.warn('Firebase Auth sign up info:', authErr?.code || authErr?.message);
         // If email already exists in Firebase Auth, attempt sign-in to claim UID
         if (authErr?.code === 'auth/email-already-in-use') {
           try {

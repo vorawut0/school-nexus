@@ -2,7 +2,8 @@ import React, { useState, useMemo, useRef } from 'react';
 import { UserProfile, ScheduleItem } from '../../types';
 import { WEEKLY_TEACHER_SCHEDULE } from '../../data/mockData';
 import { GoogleSheetsManager } from './GoogleSheetsManager';
-import { AssignmentRubric } from '../../services/googleSheetsService';
+import { GoogleSheetSyncIndicator } from './GoogleSheetSyncIndicator';
+import { AssignmentRubric, SheetPollResult } from '../../services/googleSheetsService';
 
 interface TeacherDashboardProps {
   user: UserProfile;
@@ -58,6 +59,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [inputFeedback, setInputFeedback] = useState<string>('');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [activeRubric, setActiveRubric] = useState<AssignmentRubric | null>(null);
+  const [activeSheetUrl, setActiveSheetUrl] = useState<string>(
+    'https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit'
+  );
+  const [syncUpdateAlert, setSyncUpdateAlert] = useState<SheetPollResult | null>(null);
   const sheetsSectionRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToSheets = () => {
@@ -67,6 +72,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const handleApplyRubricToGrading = (rubric: AssignmentRubric) => {
     setActiveRubric(rubric);
     showToast(`นำเกณฑ์ประเมิน "${rubric.title}" (${rubric.totalMaxScore} คะแนน) มาใช้กับการตรวจงานแล้ว`);
+  };
+
+  const handleSyncUpdateDetected = (result: SheetPollResult) => {
+    setSyncUpdateAlert(result);
+    if (result.data?.criteria) {
+      setActiveRubric(result.data);
+    }
+    showToast(`⚡ Google Sheets ได้รับการอัปเดต: ${result.sheetTitle || 'พบการเปลี่ยนแปลงใหม่'} (${result.rowCount} รายการ)`);
   };
 
   // Quick submissions queue for teacher
@@ -256,8 +269,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
           </div>
 
-          {/* Right: Quick Action Shortcuts */}
+          {/* Right: Quick Action Shortcuts & Sync Status */}
           <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+            {/* Live 60-Second Google Sheets Polling Indicator */}
+            {activeSheetUrl && (
+              <GoogleSheetSyncIndicator
+                spreadsheetUrlOrId={activeSheetUrl}
+                mode="rubric"
+                isAutoPollEnabled={true}
+                pollIntervalSeconds={60}
+                onUpdateDetected={handleSyncUpdateDetected}
+                variant="compact"
+              />
+            )}
+
             <button
               onClick={scrollToSheets}
               className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all cursor-pointer"
@@ -304,6 +329,50 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Real-time Google Sheets Change Detection Notification Alert */}
+      {syncUpdateAlert && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 border border-amber-400/60 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold shadow-xs shrink-0 animate-bounce">
+              <span className="material-symbols-outlined text-[22px]">sync_problem</span>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-amber-900 bg-amber-200 px-2 py-0.5 rounded-md">
+                  GOOGLE SHEETS UPDATED
+                </span>
+                <span className="text-xs text-slate-500 font-medium">
+                  {syncUpdateAlert.timestamp}
+                </span>
+              </div>
+              <p className="text-xs font-bold text-slate-800 mt-0.5">
+                ตรวจพบการแก้ไขข้อมูลจากระยะไกลใน: <strong>{syncUpdateAlert.sheetTitle || 'Google Sheets'}</strong> ({syncUpdateAlert.rowCount} รายการ)
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <button
+              onClick={() => {
+                scrollToSheets();
+                setSyncUpdateAlert(null);
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">visibility</span>
+              <span>ดูข้อมูลที่อัปเดต</span>
+            </button>
+            <button
+              onClick={() => setSyncUpdateAlert(null)}
+              className="p-1.5 rounded-xl hover:bg-amber-200/50 text-slate-600 hover:text-slate-900 transition-all cursor-pointer"
+              title="ปิดการแจ้งเตือน"
+            >
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 2. Top Summary Metric Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
@@ -788,6 +857,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         <GoogleSheetsManager
           user={user}
           onApplyRubricToGrading={handleApplyRubricToGrading}
+          onActiveSheetChanged={(url) => setActiveSheetUrl(url)}
         />
       </div>
 
