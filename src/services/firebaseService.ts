@@ -1806,8 +1806,13 @@ export async function addSecurityAuditLog(log: Omit<SecurityAuditLog, 'id' | 'ti
 
 export function subscribeToSecurityAuditLogs(callback: (logs: SecurityAuditLog[]) => void): () => void {
   const cached = getLocalCache<SecurityAuditLog[]>('nexus_audit_logs', []);
-  if (cached.length > 0) {
-    callback(cached);
+  const sanitizedCached = (cached || []).map((l) => ({
+    ...l,
+    actorName: l.actorName?.replace('เพ็ชรไรย์', 'เพ็ชรระยา') || l.actorName,
+    details: l.details?.replace('เพ็ชรไรย์', 'เพ็ชรระยา') || l.details,
+  }));
+  if (sanitizedCached.length > 0) {
+    callback(sanitizedCached);
   }
 
   try {
@@ -1818,12 +1823,18 @@ export function subscribeToSecurityAuditLogs(callback: (logs: SecurityAuditLog[]
         if (!snapshot.empty) {
           const logs: SecurityAuditLog[] = [];
           snapshot.forEach((doc) => {
-            logs.push({ id: doc.id, ...(doc.data() as any) });
+            const data = doc.data() as any;
+            logs.push({
+              id: doc.id,
+              ...data,
+              actorName: data.actorName?.replace('เพ็ชรไรย์', 'เพ็ชรระยา') || data.actorName,
+              details: data.details?.replace('เพ็ชรไรย์', 'เพ็ชรระยา') || data.details,
+            });
           });
           logs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
           setLocalCache('nexus_audit_logs', logs);
           callback(logs);
-        } else if (cached.length === 0) {
+        } else if (sanitizedCached.length === 0) {
           // Seed default mock audit logs if empty
           const seedAudits: SecurityAuditLog[] = [
             {
@@ -1831,7 +1842,7 @@ export function subscribeToSecurityAuditLogs(callback: (logs: SecurityAuditLog[]
               actionType: 'role_switch',
               severity: 'medium',
               actorId: 'ADM-001',
-              actorName: 'อาจารย์ วรวุฒิ เพ็ชรไรย์',
+              actorName: 'วรวุฒิ เพ็ชรระยา',
               actorRole: 'admin',
               targetId: 'ADM-001',
               targetName: 'Super Administrator',
