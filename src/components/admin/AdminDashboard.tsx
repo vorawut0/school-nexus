@@ -7,6 +7,7 @@ import {
   addSystemLogInFirestore,
   addSecurityAuditLog,
   getLocalCache,
+  resetAllSystemDataAndFactoryDefaults,
 } from '../../services/firebaseService';
 
 interface AdminDashboardProps {
@@ -100,6 +101,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         targetName: 'Campus Security Master Lock',
         details: `ผู้ดูแลระบบ ${user.thaiName} สั่ง "ยกเลิกล็อกดาวน์ฉุกเฉิน คืนสถานะการเปิดประตูปกติ"`,
       });
+    }
+  };
+
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState<boolean>(false);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
+
+  const handleExecuteSystemReset = async () => {
+    setIsResetting(true);
+    try {
+      const res = await resetAllSystemDataAndFactoryDefaults();
+      setIsResetting(false);
+      setShowResetConfirmModal(false);
+      if (res.success) {
+        showToast('✨ รีเซ็ตระบบทุกส่วนเป็นศูนย์และเชื่อมโยงข้อมูลพร้อมใช้งานทันที!');
+        addSystemLogInFirestore({
+          title: 'System Factory Reset Executed',
+          description: `ผู้ดูแลระบบ ${user.thaiName} ดำเนินการรีเซ็ตระบบและคืนค่าเริ่มต้นให้ทุกโมดูล`,
+          category: 'system',
+          level: 'alert',
+          deviceOrGate: 'SYSTEM-CORE',
+        });
+      } else {
+        showToast('⚠️ ดำเนินการรีเซ็ตข้อมูลบางส่วนเรียบร้อยแล้ว');
+      }
+    } catch (err) {
+      setIsResetting(false);
+      setShowResetConfirmModal(false);
+      showToast('⚠️ เกิดข้อผิดพลาดขณะรีเซ็ตระบบ');
     }
   };
 
@@ -263,6 +292,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               <span className="material-symbols-outlined text-[16px]">campaign</span>
               <span>ส่งประกาศด่วน (Broadcast)</span>
+            </button>
+
+            <button
+              onClick={() => setShowResetConfirmModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-rose-600/90 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer border border-rose-500/40"
+              title="รีเซ็ตและเคลียร์ข้อมูลทุกระบบให้พร้อมใช้งานใหม่ทันที"
+            >
+              <span className="material-symbols-outlined text-[16px]">restart_alt</span>
+              <span>รีเซ็ตระบบเป็นศูนย์ (Full Reset)</span>
             </button>
 
             <button
@@ -472,6 +510,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                   <div className="font-bold text-xs text-slate-900 group-hover:text-rose-700">สำรองฐานข้อมูล Snapshot</div>
                   <div className="text-[10px] text-slate-500 mt-0.5">ดาวน์โหลด JSON Real-time Backup</div>
+                </button>
+
+                <button
+                  onClick={() => setShowResetConfirmModal(true)}
+                  className="p-3.5 rounded-2xl bg-slate-50 hover:bg-red-50/80 border border-slate-200/80 hover:border-red-300 text-left transition-all group cursor-pointer"
+                >
+                  <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                    <span className="material-symbols-outlined text-[20px]">restart_alt</span>
+                  </div>
+                  <div className="font-bold text-xs text-slate-900 group-hover:text-red-700">รีเซ็ตระบบ Factory Reset</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">ล้างค่าเป็นศูนย์ & ซิงค์ทุกระบบพร้อมใช้งาน</div>
                 </button>
               </div>
             </div>
@@ -734,6 +783,79 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* System Factory Reset Confirmation Modal */}
+      {showResetConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-fadeIn">
+          <div
+            className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col animate-scaleUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-red-600 to-rose-700 text-white">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-2xl text-red-200">restart_alt</span>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base sm:text-lg">ยืนยันรีเซ็ตระบบเป็นศูนย์</h3>
+                  <p className="text-xs text-red-100">Full System & Data Reset to Ready State</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isResetting && setShowResetConfirmModal(false)}
+                disabled={isResetting}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-5 flex flex-col gap-4">
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-950 space-y-2">
+                <div className="font-bold flex items-center gap-1.5 text-rose-800">
+                  <span className="material-symbols-outlined text-[18px]">warning</span>
+                  <span>ผลลัพธ์ของการรีเซ็ตระบบ:</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-slate-700 text-[11px]">
+                  <li>เคลียร์คิวกิจกรรมออฟไลน์และแคชข้อมูลทั้งหมดในเครื่อง</li>
+                  <li>รีเซ็ตบันทึกประวัติการบ้าน การจองห้อง และแจ้งเตือนให้สะอาดพร้อมใช้งาน</li>
+                  <li>ปรับปรุงค่าเชื่อมโยงทุกโมดูล (นักเรียน, อาจารย์, ผู้ปกครอง, แอดมิน) เข้าสู่สถานะพร้อมเริ่มทันที</li>
+                  <li>สร้างแจ้งเตือนระบบต้อนรับการเริ่มใช้งานระบบใหม่แบบอัตโนมัติ</li>
+                </ul>
+              </div>
+
+              <p className="text-xs text-slate-600">
+                คุณแน่ใจหรือไม่ว่าต้องการดำเนินการรีเซ็ตระบบ School Nexus ตอนนี้?
+              </p>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isResetting}
+                  onClick={() => setShowResetConfirmModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  disabled={isResetting}
+                  onClick={handleExecuteSystemReset}
+                  className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  <span className={`material-symbols-outlined text-base ${isResetting ? 'animate-spin' : ''}`}>
+                    {isResetting ? 'sync' : 'restart_alt'}
+                  </span>
+                  <span>{isResetting ? 'กำลังดำเนินการรีเซ็ต...' : 'ยืนยันรีเซ็ตระบบ'}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

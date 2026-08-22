@@ -134,6 +134,16 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const handleReset = () => {
+      setStudents(DEFAULT_CLASS_STUDENTS);
+    };
+    window.addEventListener('sn_system_full_reset', handleReset);
+    return () => {
+      window.removeEventListener('sn_system_full_reset', handleReset);
+    };
+  }, []);
+
   const toggleStudentStatus = async (studentId: string, nextStatus: StudentAttendanceRecord['status']) => {
     const targetStudent = students.find((s) => s.id === studentId);
     const timeNow = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';

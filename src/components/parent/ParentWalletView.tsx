@@ -101,6 +101,18 @@ export const ParentWalletView: React.FC<ParentWalletViewProps> = ({ user }) => {
     return () => clearInterval(timer);
   }, [showTopupModal, topupStep, countdown]);
 
+  useEffect(() => {
+    const handleReset = () => {
+      setBalance(420);
+      setDailyLimit(150);
+      setTransactions(INITIAL_TRANSACTIONS);
+    };
+    window.addEventListener('sn_system_full_reset', handleReset);
+    return () => {
+      window.removeEventListener('sn_system_full_reset', handleReset);
+    };
+  }, []);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);

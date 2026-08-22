@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../../types';
 import { pushRealtimeNotification } from '../../services/firebaseService';
 
@@ -17,6 +17,19 @@ interface LeaveRequest {
   hasAttachment: boolean;
 }
 
+const INITIAL_LEAVE_HISTORY: LeaveRequest[] = [
+  {
+    id: 'leave-1',
+    type: 'sick',
+    startDate: '10 ส.ค. 2026',
+    endDate: '10 ส.ค. 2026',
+    reason: 'มีไข้และพบแพทย์ตามนัดหมาย',
+    status: 'approved',
+    submittedDate: '10 ส.ค. 2026 07:15 น.',
+    hasAttachment: true,
+  }
+];
+
 export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user }) => {
   const [showLeaveForm, setShowLeaveForm] = useState(false);
   const [leaveType, setLeaveType] = useState<'sick' | 'personal' | 'official'>('sick');
@@ -26,18 +39,21 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
   const [attachedFileName, setAttachedFileName] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const [leaveHistory, setLeaveHistory] = useState<LeaveRequest[]>([
-    {
-      id: 'leave-1',
-      type: 'sick',
-      startDate: '10 ส.ค. 2026',
-      endDate: '10 ส.ค. 2026',
-      reason: 'มีไข้และพบแพทย์ตามนัดหมาย',
-      status: 'approved',
-      submittedDate: '10 ส.ค. 2026 07:15 น.',
-      hasAttachment: true,
-    }
-  ]);
+  const [leaveHistory, setLeaveHistory] = useState<LeaveRequest[]>(INITIAL_LEAVE_HISTORY);
+
+  useEffect(() => {
+    const handleReset = () => {
+      setLeaveHistory(INITIAL_LEAVE_HISTORY);
+      setShowLeaveForm(false);
+      setLeaveReason('');
+      setStartDate('');
+      setEndDate('');
+    };
+    window.addEventListener('sn_system_full_reset', handleReset);
+    return () => {
+      window.removeEventListener('sn_system_full_reset', handleReset);
+    };
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);

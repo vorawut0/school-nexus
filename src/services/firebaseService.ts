@@ -2080,3 +2080,145 @@ async function initializeDefaultNotifications() {
     }
   }
 }
+
+/**
+ * System Reset & Complete Clean Slate to Zero
+ * Resets all connected subsystems (Assignments, Bookings, Notifications, System Logs, Audit Logs, Offline Queue)
+ * and restores factory default clean values ready for immediate use.
+ */
+export async function resetAllSystemDataAndFactoryDefaults(): Promise<{
+  success: boolean;
+  clearedCollections: string[];
+  restoredEntities: string[];
+}> {
+  const cleared: string[] = [];
+  const restored: string[] = [];
+
+  try {
+    // 1. Reset Local Cache & LocalStorage
+    const keysToRemove = [
+      'sn_cache_assignments',
+      'sn_cache_roomBookings',
+      'sn_cache_notifications',
+      'sn_cache_system_logs',
+      'sn_cache_audit_logs',
+      'sn_cache_offline_sync_queue',
+      'sn_cache_all_users_list',
+      'sn_offline_queue',
+      'sn_parent_transactions',
+      'sn_parent_leave_requests',
+      'sn_parent_balance',
+      'sn_emergency_lockdown',
+    ];
+
+    keysToRemove.forEach((k) => {
+      try {
+        localStorage.removeItem(k);
+      } catch {
+        // ignore
+      }
+    });
+
+    // 2. Clear & Seed Firestore Collections
+    const collectionsToReset = [
+      'notifications',
+      'systemLogs',
+      'securityAuditLogs',
+      'offlineActions',
+    ];
+
+    for (const colName of collectionsToReset) {
+      try {
+        const colRef = collection(db, colName);
+        const snap = await getDocs(colRef);
+        for (const docItem of snap.docs) {
+          await deleteDoc(doc(db, colName, docItem.id));
+        }
+        cleared.push(colName);
+      } catch (e) {
+        console.debug(`Notice resetting ${colName}:`, e);
+      }
+    }
+
+    // 3. Reset Assignments in Firestore to clean initial default
+    try {
+      const asgCol = collection(db, 'assignments');
+      const asgSnap = await getDocs(asgCol);
+      for (const d of asgSnap.docs) {
+        await deleteDoc(doc(db, 'assignments', d.id));
+      }
+      for (const item of MOCK_ASSIGNMENTS) {
+        await setDoc(doc(db, 'assignments', item.id), item);
+      }
+      setLocalCache('assignments', MOCK_ASSIGNMENTS);
+      restored.push('assignments');
+    } catch (e) {
+      console.debug('Notice resetting assignments:', e);
+      setLocalCache('assignments', MOCK_ASSIGNMENTS);
+    }
+
+    // 4. Reset Room Bookings to clean initial default
+    try {
+      const bkCol = collection(db, 'roomBookings');
+      const bkSnap = await getDocs(bkCol);
+      for (const d of bkSnap.docs) {
+        await deleteDoc(doc(db, 'roomBookings', d.id));
+      }
+      for (const item of INITIAL_ROOM_BOOKINGS) {
+        await setDoc(doc(db, 'roomBookings', item.id), item);
+      }
+      setLocalCache('roomBookings', INITIAL_ROOM_BOOKINGS);
+      restored.push('roomBookings');
+    } catch (e) {
+      console.debug('Notice resetting roomBookings:', e);
+      setLocalCache('roomBookings', INITIAL_ROOM_BOOKINGS);
+    }
+
+    // 5. Seed initial clean Welcome Notification
+    const welcomeNotif: NotificationItem = {
+      id: `notif-reset-${Date.now()}`,
+      title: '✨ ระบบ School Nexus รีเซ็ตพร้อมใช้งาน 100%',
+      message: 'ข้อมูลและค่าทุกระบบได้รับการเชื่อมโยงและปรับสถานะให้พร้อมเริ่มต้นการทำงานใหม่ทันที',
+      type: 'system',
+      timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+      read: false,
+      priority: 'high',
+      icon: 'restart_alt',
+      role: 'all',
+    };
+    try {
+      await setDoc(doc(db, 'notifications', welcomeNotif.id), welcomeNotif);
+      setLocalCache('notifications', [welcomeNotif]);
+      restored.push('notifications');
+    } catch {
+      setLocalCache('notifications', [welcomeNotif]);
+    }
+
+    // 6. Reset System Users list to Default Presets
+    const defaultList = [
+      DEMO_PRESET_USERS.student,
+      DEMO_PRESET_USERS.teacher,
+      DEMO_PRESET_USERS.admin,
+      DEMO_PRESET_USERS.parent,
+    ];
+    setLocalCache('all_users_list', defaultList);
+
+    // 7. Clear pending offline queue
+    setLocalCache('offline_sync_queue', []);
+    window.dispatchEvent(new CustomEvent('sn_offline_queue_changed', { detail: { count: 0 } }));
+    window.dispatchEvent(new CustomEvent('sn_system_full_reset', { detail: { timestamp: Date.now() } }));
+
+    return {
+      success: true,
+      clearedCollections: cleared,
+      restoredEntities: restored,
+    };
+  } catch (err: any) {
+    console.error('Failed to full reset system:', err);
+    return {
+      success: false,
+      clearedCollections: cleared,
+      restoredEntities: restored,
+    };
+  }
+}

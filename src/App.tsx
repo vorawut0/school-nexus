@@ -228,9 +228,29 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    const handleSystemResetEvent = () => {
+      setAssignments(MOCK_ASSIGNMENTS);
+      setRoomBookings(INITIAL_ROOM_BOOKINGS);
+      setNotifications([
+        {
+          id: `notif-reset-${Date.now()}`,
+          title: '✨ ระบบ School Nexus รีเซ็ตพร้อมใช้งาน 100%',
+          message: 'ข้อมูลและค่าทุกระบบได้รับการเชื่อมโยงและปรับสถานะให้พร้อมเริ่มต้นการทำงานใหม่ทันที',
+          type: 'system',
+          timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+          read: false,
+          priority: 'high',
+          icon: 'restart_alt',
+          role: 'all',
+        },
+      ]);
+    };
+    window.addEventListener('sn_system_full_reset', handleSystemResetEvent);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('sn_system_full_reset', handleSystemResetEvent);
     };
   }, []);
 
