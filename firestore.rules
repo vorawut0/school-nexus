@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // System connection test document
+    match /system/{docId} {
+      allow read, write: if true;
+    }
+
+    // User Profiles
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Room Bookings & Smart Passes
+    match /roomBookings/{bookingId} {
+      allow read, write: if true;
+    }
+
+    // Assignments
+    match /assignments/{assignmentId} {
+      allow read, write: if true;
+    }
+
+    // Submissions
+    match /submissions/{submissionId} {
+      allow read, write: if true;
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read, write: if true;
+    }
+
+    // Classes & Schedules
+    match /classes/{classId} {
+      allow read, write: if true;
+    }
+    match /schedules/{scheduleId} {
+      allow read, write: if true;
+    }
+
+    // Attendance & Leaves
+    match /attendance/{attendanceId} {
+      allow read, write: if true;
+    }
+    match /leave_requests/{leaveId} {
+      allow read, write: if true;
+    }
+
+    // Fallback for any other school nexus collections
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

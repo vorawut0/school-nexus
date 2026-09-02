@@ -1,0 +1,302 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role, school ID, stats and personal info",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique user ID or UID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name in English"
+        },
+        "thaiName": {
+          "type": "string",
+          "description": "Full name in Thai"
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Student or staff ID"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "teacher", "admin", "parent"],
+          "description": "Role in the school system"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Avatar image URL"
+        },
+        "level": {
+          "type": "number",
+          "description": "Gamification level"
+        },
+        "xp": {
+          "type": "number",
+          "description": "Experience points"
+        },
+        "nextLevelXp": {
+          "type": "number",
+          "description": "XP required for next level"
+        },
+        "streakDays": {
+          "type": "number",
+          "description": "Daily streak count"
+        },
+        "grade": {
+          "type": "string",
+          "description": "Class grade"
+        },
+        "room": {
+          "type": "string",
+          "description": "Classroom"
+        },
+        "major": {
+          "type": "string",
+          "description": "Study major"
+        },
+        "gpa": {
+          "type": "number",
+          "description": "Cumulative GPA"
+        },
+        "advisor": {
+          "type": "string",
+          "description": "Faculty advisor"
+        },
+        "rfidCard": {
+          "type": "string",
+          "description": "Smart RFID card identifier"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last updated timestamp"
+        }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "RoomBooking": {
+      "title": "RoomBooking",
+      "description": "Reservation record for campus room or facility",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Booking identifier"
+        },
+        "facilityId": {
+          "type": "string",
+          "description": "Facility category ID"
+        },
+        "facilityName": {
+          "type": "string",
+          "description": "Facility category title"
+        },
+        "facilityIcon": {
+          "type": "string",
+          "description": "Facility icon name"
+        },
+        "roomId": {
+          "type": "string",
+          "description": "Specific room ID"
+        },
+        "roomName": {
+          "type": "string",
+          "description": "Room name"
+        },
+        "roomCode": {
+          "type": "string",
+          "description": "Room short code"
+        },
+        "date": {
+          "type": "string",
+          "description": "Reservation date"
+        },
+        "timeSlot": {
+          "type": "string",
+          "description": "Time slot label"
+        },
+        "startTime": {
+          "type": "string",
+          "description": "Start time"
+        },
+        "endTime": {
+          "type": "string",
+          "description": "End time"
+        },
+        "purpose": {
+          "type": "string",
+          "description": "Purpose of booking"
+        },
+        "attendeesCount": {
+          "type": "number",
+          "description": "Number of participants"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["confirmed", "active", "completed", "cancelled"],
+          "description": "Current status"
+        },
+        "passCode": {
+          "type": "string",
+          "description": "Smart Pass unlock code"
+        },
+        "qrValue": {
+          "type": "string",
+          "description": "QR Code payload string"
+        },
+        "bookedAt": {
+          "type": "string",
+          "description": "Booking timestamp"
+        },
+        "bookedBy": {
+          "type": "string",
+          "description": "User ID who created the reservation"
+        },
+        "unlocked": {
+          "type": "boolean",
+          "description": "Whether door has been unlocked"
+        }
+      },
+      "required": ["id", "roomId", "date", "timeSlot", "bookedBy", "status"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Course assignment or homework task",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Assignment ID"
+        },
+        "title": {
+          "type": "string",
+          "description": "Task title"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject name"
+        },
+        "subjectCode": {
+          "type": "string",
+          "description": "Subject code"
+        },
+        "categoryColor": {
+          "type": "string",
+          "description": "Color tag"
+        },
+        "dueDate": {
+          "type": "string",
+          "description": "Due date"
+        },
+        "dueRelative": {
+          "type": "string",
+          "description": "Relative due time text"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["in_progress", "submitted", "overdue", "to_submit"],
+          "description": "Submission status"
+        },
+        "progress": {
+          "type": "number",
+          "description": "Completion percentage"
+        },
+        "maxScore": {
+          "type": "number",
+          "description": "Maximum score"
+        },
+        "description": {
+          "type": "string",
+          "description": "Assignment prompt"
+        },
+        "submittedAt": {
+          "type": "string",
+          "description": "Submission timestamp"
+        },
+        "submissionNotes": {
+          "type": "string",
+          "description": "Student notes on submission"
+        },
+        "userId": {
+          "type": "string",
+          "description": "User ID of owner"
+        }
+      },
+      "required": ["id", "title", "subject", "status"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "Push and in-app notification item",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Notification ID"
+        },
+        "title": {
+          "type": "string",
+          "description": "Notification title"
+        },
+        "message": {
+          "type": "string",
+          "description": "Detailed body message"
+        },
+        "time": {
+          "type": "string",
+          "description": "Timestamp"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["assignment", "class", "grade", "system", "security", "attendance", "iot", "payment"],
+          "description": "Notification category"
+        },
+        "role": {
+          "type": "string",
+          "description": "Target user role"
+        },
+        "priority": {
+          "type": "string",
+          "description": "Notification priority level"
+        },
+        "icon": {
+          "type": "string",
+          "description": "Material symbol icon name"
+        },
+        "read": {
+          "type": "boolean",
+          "description": "Read status"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Target user ID"
+        }
+      },
+      "required": ["id", "title", "message", "type", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Stores user profile and account information"
+    },
+    "/roomBookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/RoomBooking" },
+      "description": "Stores campus room reservations and Smart Passes"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/Assignment" },
+      "description": "Stores course assignments and homework progress"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "Stores user notifications and alerts"
+    }
+  }
+}
