@@ -935,8 +935,8 @@ export async function signInUser(
         aId === lowerId ||
         aStudentId === lowerId ||
         aEmail === lowerId ||
-        (aName && aName.includes(lowerId)) ||
-        (aThaiName && aThaiName.includes(lowerId))
+        (aName && aName === lowerId) ||
+        (aThaiName && aThaiName === lowerId)
       );
     });
 
@@ -945,20 +945,36 @@ export async function signInUser(
       const matched = (selectedRole ? matchingLocalList.find((a) => a.role === selectedRole) : null) || matchingLocalList[0];
 
       const isDemo = matched.id.startsWith('demo-') || matched.id.startsWith('sn-');
+      const storedPw = matched.password?.trim();
+      
+      // Strict password match: if custom password is set, require it; if demo account, accept demo passwords
       const isPwMatch =
-        !matched.password ||
-        matched.password.trim() === inputPassword ||
-        (isDemo && isAnyDemoPassword) ||
-        isAnyDemoPassword;
+        (storedPw && storedPw === inputPassword) ||
+        (!storedPw && isAnyDemoPassword) ||
+        (isDemo && isAnyDemoPassword);
 
       if (isPwMatch) {
+        // Ensure latest avatar and theme are attached
+        const customAvatar = getPersistedAvatar(matched.user);
+        const customTheme = getPersistedCardTheme(matched.user);
+        const resolvedUser: UserProfile = {
+          ...matched.user,
+          avatar: customAvatar || matched.user.avatar || ASSETS.headerAvatar,
+          cardTheme: customTheme || matched.user.cardTheme || 'obsidian-gold',
+        };
+
         // Sync profile to cloud in background without blocking login
-        saveUserProfile(matched.user).catch((e) => console.debug('Background profile sync:', e));
-        return { success: true, user: matched.user };
+        saveUserProfile(resolvedUser).catch((e) => console.debug('Background profile sync:', e));
+        return { success: true, user: resolvedUser };
+      } else {
+        return {
+          success: false,
+          error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
+        };
       }
     }
 
-    // Check seed accounts & presets
+    // Check seed accounts & presets (official verified school registries)
     const seedAccounts = getDefaultSeedAccounts();
     const matchedSeed = seedAccounts.find((s) => {
       const sId = s.id?.toLowerCase();
@@ -967,8 +983,7 @@ export async function signInUser(
       return (
         sId === lowerId ||
         sStudentId === lowerId ||
-        sEmail === lowerId ||
-        (s.name && s.name.toLowerCase() === lowerId)
+        sEmail === lowerId
       );
     });
 
@@ -978,23 +993,20 @@ export async function signInUser(
         isAnyDemoPassword;
 
       if (isPwMatch) {
-        saveStoredAccount(matchedSeed);
-        return { success: true, user: matchedSeed.user };
-      }
-    }
-
-    // If identifier matches any demo preset user
-    const allPresets = Object.values(DEMO_PRESET_USERS);
-    const matchedPreset = allPresets.find(
-      (p) =>
-        p.studentId?.toLowerCase() === lowerId ||
-        p.email?.toLowerCase() === lowerId ||
-        p.id?.toLowerCase() === lowerId
-    );
-
-    if (matchedPreset) {
-      if (isAnyDemoPassword || inputPassword.length >= 4) {
-        return { success: true, user: matchedPreset };
+        const customAvatar = getPersistedAvatar(matchedSeed.user);
+        const customTheme = getPersistedCardTheme(matchedSeed.user);
+        const resolvedUser: UserProfile = {
+          ...matchedSeed.user,
+          avatar: customAvatar || matchedSeed.user.avatar,
+          cardTheme: customTheme || matchedSeed.user.cardTheme || 'obsidian-gold',
+        };
+        saveStoredAccount({ ...matchedSeed, user: resolvedUser });
+        return { success: true, user: resolvedUser };
+      } else {
+        return {
+          success: false,
+          error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
+        };
       }
     }
 
