@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>School Nexus - Google Authentication Bridge</title>
+  <!-- Firebase SDK v10 (compat for standalone helper bridge) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #0c1527;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    h2 { margin: 0 0 8px 0; font-size: 20px; font-weight: 600; }
+    p { margin: 0; color: #94a3b8; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <h2>กำลังยืนยันตัวตนด้วย Google...</h2>
+  <p>ระบบกำลังพาคุณกลับเข้าสู่ School Nexus</p>
+
+  <script>
+    (async function() {
+      try {
+        const configResp = await fetch('/firebase-applet-config.json');
+        const firebaseConfig = await configResp.json();
+        firebase.initializeApp(firebaseConfig);
+
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+
+        const result = await firebase.auth().signInWithPopup(provider);
+        const user = result.user;
+
+        if (window.opener) {
+          window.opener.postMessage({
+            type: 'SN_GOOGLE_AUTH_SUCCESS',
+            email: user.email,
+            displayName: user.displayName,
+            photoURL: user.photoURL,
+            uid: user.uid,
+          }, '*');
+          window.close();
+        } else {
+          window.location.href = '/';
+        }
+      } catch (err) {
+        console.error('Google Auth Bridge Error:', err);
+        if (window.opener) {
+          window.opener.postMessage({
+            type: 'SN_GOOGLE_AUTH_ERROR',
+            error: err.code || err.message
+          }, '*');
+          window.close();
+        } else {
+          alert('เกิดข้อผิดพลาดในการลงชื่อเข้าใช้: ' + (err.message || ''));
+          window.location.href = '/';
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
