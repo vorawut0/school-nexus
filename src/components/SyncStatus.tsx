@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   getPendingOfflineQueue,
   getPendingOfflineQueueCount,
@@ -23,78 +23,125 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({
   const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [showDrawer, setShowDrawer] = useState<boolean>(false);
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(true);
+  const [lastSyncTime, setLastSyncTime] = useState<string>(() =>
+    new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  );
+  const isSyncingRef = useRef(false);
 
   // Refresh pending count on events and intervals
-  const refreshQueue = () => {
+  const refreshQueue = useCallback(() => {
     const items = getPendingOfflineQueue();
     setPendingItems(items);
     setPendingCount(items.length);
-  };
+  }, []);
 
+  // Handle manual or automatic sync execution
+  const executeSync = useCallback(
+    async (isAuto = false) => {
+      if (isSyncingRef.current || isOffline) return;
+
+      const currentCount = getPendingOfflineQueueCount();
+      if (currentCount === 0 && isAuto) return;
+
+      isSyncingRef.current = true;
+      setIsSyncing(true);
+      if (!isAuto) {
+        setSyncStatus('idle');
+        setStatusMessage('กำลังเชื่อมต่อและซิงค์ข้อมูลกับ Firestore...');
+      }
+
+      try {
+        const res = await syncOfflineQueueToFirestore();
+        refreshQueue();
+        const timeNow = new Date().toLocaleTimeString('th-TH', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+        setLastSyncTime(timeNow);
+
+        if (res.syncedCount > 0) {
+          setSyncStatus('success');
+          setStatusMessage(`อัปเดตอัตโนมัติสำเร็จ (${res.syncedCount} รายการ) เมื่อ ${timeNow}`);
+          if (onSyncComplete) {
+            onSyncComplete(res.syncedCount);
+          }
+        } else if (res.totalRemaining === 0) {
+          if (!isAuto) {
+            setSyncStatus('success');
+            setStatusMessage('ข้อมูลเป็นเวอร์ชันล่าสุดตรงกับ Firestore แล้ว');
+          }
+        } else {
+          setSyncStatus('error');
+          setStatusMessage('มีบางรายการยังซิงค์ไม่สำเร็จ ระบบจะลองใหม่อัตโนมัติในรอบถัดไป');
+        }
+      } catch (err: any) {
+        setSyncStatus('error');
+        setStatusMessage(`การซิงค์ล้มเหลว: ${err?.message || 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต'}`);
+      } finally {
+        isSyncingRef.current = false;
+        setIsSyncing(false);
+        setTimeout(() => {
+          setSyncStatus('idle');
+        }, 5000);
+      }
+    },
+    [isOffline, onSyncComplete, refreshQueue]
+  );
+
+  // Setup listeners and automatic sync background timer
   useEffect(() => {
     refreshQueue();
 
     const handleQueueChange = () => {
       refreshQueue();
+      // If auto-sync is enabled and online, trigger sync automatically
+      if (isAutoSyncEnabled && !isOffline && !isSyncingRef.current) {
+        setTimeout(() => executeSync(true), 600);
+      }
     };
 
     window.addEventListener('sn_offline_queue_changed', handleQueueChange);
-    window.addEventListener('online', refreshQueue);
+    window.addEventListener('online', () => {
+      refreshQueue();
+      if (isAutoSyncEnabled) {
+        setTimeout(() => executeSync(true), 800);
+      }
+    });
     window.addEventListener('offline', refreshQueue);
 
-    const interval = setInterval(refreshQueue, 5000);
+    // Cross-tab synchronization
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'sn_offline_mutation_queue' || e.key?.startsWith('sn_')) {
+        refreshQueue();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    // Auto-sync interval: checks queue every 6 seconds and auto-pushes if items exist
+    const autoSyncInterval = setInterval(() => {
+      refreshQueue();
+      if (isAutoSyncEnabled && !isOffline && !isSyncingRef.current) {
+        const count = getPendingOfflineQueueCount();
+        if (count > 0) {
+          executeSync(true);
+        }
+      }
+    }, 6000);
 
     return () => {
       window.removeEventListener('sn_offline_queue_changed', handleQueueChange);
       window.removeEventListener('online', refreshQueue);
       window.removeEventListener('offline', refreshQueue);
-      clearInterval(interval);
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(autoSyncInterval);
     };
-  }, []);
+  }, [executeSync, isAutoSyncEnabled, isOffline, refreshQueue]);
 
-  // Handle manual sync trigger
-  const handleManualSync = async (e?: React.MouseEvent) => {
+  const handleManualSync = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (isSyncing) return;
-
-    if (isOffline) {
-      setSyncStatus('error');
-      setStatusMessage('ไม่สามารถซิงค์ได้เนื่องจากอุปกรณ์อยู่ในสถานะออฟไลน์');
-      setTimeout(() => setSyncStatus('idle'), 4000);
-      return;
-    }
-
-    setIsSyncing(true);
-    setSyncStatus('idle');
-    setStatusMessage('กำลังเชื่อมต่อและซิงค์ข้อมูลกับ Firestore...');
-
-    try {
-      const res = await syncOfflineQueueToFirestore();
-      refreshQueue();
-      setIsSyncing(false);
-
-      if (res.syncedCount > 0) {
-        setSyncStatus('success');
-        setStatusMessage(`ซิงค์ข้อมูลสำเร็จเรียบร้อยแล้ว (${res.syncedCount} รายการ)`);
-        if (onSyncComplete) {
-          onSyncComplete(res.syncedCount);
-        }
-      } else if (res.totalRemaining === 0) {
-        setSyncStatus('success');
-        setStatusMessage('ข้อมูลเป็นเวอร์ชันล่าสุดตรงกับ Firestore แล้ว');
-      } else {
-        setSyncStatus('error');
-        setStatusMessage('มีบางรายการยังซิงค์ไม่สำเร็จ ระบบจะเก็บไว้ลองใหม่อีกครั้ง');
-      }
-    } catch (err: any) {
-      setIsSyncing(false);
-      setSyncStatus('error');
-      setStatusMessage(`การซิงค์ล้มเหลว: ${err?.message || 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต'}`);
-    }
-
-    setTimeout(() => {
-      setSyncStatus('idle');
-    }, 5000);
+    executeSync(false);
   };
 
   return (
@@ -150,12 +197,12 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({
           {/* Label */}
           <span className="hidden sm:inline text-[11px]">
             {isSyncing
-              ? 'กำลังซิงค์...'
+              ? 'กำลังอัปเดต...'
               : pendingCount > 0
               ? `รอซิงค์ (${pendingCount})`
               : isOffline
               ? 'ออฟไลน์'
-              : 'Firestore Sync'}
+              : '⚡ อัปเดตอัตโนมัติ'}
           </span>
         </button>
 
@@ -199,11 +246,11 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({
                   </span>
                 </div>
                 <div>
-                  <h3 className="font-bold text-[#121b2e] text-base sm:text-lg">สถานะการซิงค์ข้อมูล</h3>
+                  <h3 className="font-bold text-[#121b2e] text-base sm:text-lg">ระบบอัปเดตข้อมูลอัตโนมัติ</h3>
                   <p className="text-xs text-slate-500">
                     {isOffline
                       ? 'ระบบกำลังทำงานในโหมด Offline (บันทึกในเครื่อง)'
-                      : 'เชื่อมต่อกับ Cloud Firestore เรียบร้อย'}
+                      : 'เชื่อมต่อกับ Cloud Firestore (Live Auto-Sync)'}
                   </p>
                 </div>
               </div>
@@ -240,6 +287,36 @@ export const SyncStatus: React.FC<SyncStatusProps> = ({
 
             {/* Body Info & Queue List */}
             <div className="p-4 sm:p-5 overflow-y-auto flex-1 flex flex-col gap-4">
+              {/* Auto Sync Toggle & Info Card */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/70 to-indigo-50/70 border border-blue-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                    <span className="material-symbols-outlined text-[18px]">bolt</span>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <span>อัปเดตข้อมูลอัตโนมัติ (Live Auto-Sync)</span>
+                      <span className={`w-2 h-2 rounded-full ${isAutoSyncEnabled && !isOffline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {isAutoSyncEnabled
+                        ? `เปิดใช้งาน • อัปเดตล่าสุด ${lastSyncTime}`
+                        : 'ปิดใช้งานชั่วคราว'}
+                    </div>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isAutoSyncEnabled}
+                    onChange={(e) => setIsAutoSyncEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+
               {/* Network Status Card */}
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-between">
                 <div className="flex items-center gap-3">

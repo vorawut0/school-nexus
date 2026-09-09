@@ -8,87 +8,18 @@ import {
   getLeaveRequests,
   reviewLeaveRequest,
 } from '../../services/leaveService';
-
-interface StudentAttendanceRecord {
-  id: string;
-  studentId: string;
-  name: string;
-  thaiName: string;
-  avatar: string;
-  status: 'present' | 'late' | 'leave' | 'absent';
-  checkInTime?: string;
-  method: 'rfid' | 'qr' | 'face' | 'manual';
-  note?: string;
-}
+import {
+  StudentAttendanceRecord,
+  getDailyAttendance,
+  saveDailyAttendance,
+  updateSingleStudentAttendance,
+  DEFAULT_CLASS_STUDENTS,
+} from '../../services/attendanceService';
 
 interface TeacherAttendanceViewProps {
   user: UserProfile;
   onOpenQrScanner?: () => void;
 }
-
-const DEFAULT_CLASS_STUDENTS: StudentAttendanceRecord[] = [
-  {
-    id: 'std-1',
-    studentId: '66041001',
-    name: 'Vorawut Phetrai',
-    thaiName: 'วรวุฒิ เพ็ชรราย',
-    avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=300',
-    status: 'present',
-    checkInTime: '08:24 น.',
-    method: 'rfid',
-  },
-  {
-    id: 'std-2',
-    studentId: '66040188',
-    name: 'Natthaphon Siriphan',
-    thaiName: 'ณัฐพล ศิริพันธ์ (กันต์)',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
-    status: 'present',
-    checkInTime: '08:26 น.',
-    method: 'qr',
-  },
-  {
-    id: 'std-3',
-    studentId: '66040233',
-    name: 'Chatchai Phromsiri',
-    thaiName: 'ฉัตรชัย พรหมศิริ',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=300',
-    status: 'late',
-    checkInTime: '08:42 น.',
-    method: 'manual',
-    note: 'เดินทางจากต่างอำเภอ',
-  },
-  {
-    id: 'std-4',
-    studentId: '66040319',
-    name: 'Kanya Rattanasak',
-    thaiName: 'กัญญา รัตนศักดิ์',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=300',
-    status: 'leave',
-    method: 'manual',
-    note: 'ลาป่วย มีใบรับรองแพทย์',
-  },
-  {
-    id: 'std-5',
-    studentId: '66040402',
-    name: 'Thanakorn Wongsawat',
-    thaiName: 'ธนากร วงศ์สวัสดิ์',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=300',
-    status: 'present',
-    checkInTime: '08:18 น.',
-    method: 'rfid',
-  },
-  {
-    id: 'std-6',
-    studentId: '66040511',
-    name: 'Pimchanok Srisuk',
-    thaiName: 'พิมพ์ชนก ศรีสุข',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=300',
-    status: 'absent',
-    method: 'manual',
-    note: 'ไม่พบข้อมูลการติดต่อ',
-  },
-];
 
 export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
   user,
@@ -104,8 +35,8 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [leaveFilter, setLeaveFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
 
-  // Student Attendance Data dynamically merged from Firestore
-  const [students, setStudents] = useState<StudentAttendanceRecord[]>(DEFAULT_CLASS_STUDENTS);
+  // Student Attendance Data dynamically merged from Firestore & Local Storage
+  const [students, setStudents] = useState<StudentAttendanceRecord[]>(() => getDailyAttendance());
 
   const loadLeaveData = () => {
     const list = getLeaveRequests();
@@ -121,6 +52,27 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
     return () => window.removeEventListener('sn_leave_requests_updated', handleLeaveUpdate);
   }, []);
 
+  // Listen to attendance updates from other components or tabs
+  useEffect(() => {
+    const handleAttendanceUpdate = (e: any) => {
+      const records = e?.detail?.records || getDailyAttendance();
+      setStudents(records);
+    };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'sn_daily_attendance_v2') {
+        setStudents(getDailyAttendance());
+      }
+    };
+
+    window.addEventListener('sn_attendance_updated', handleAttendanceUpdate);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('sn_attendance_updated', handleAttendanceUpdate);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
   const pendingLeaveCount = leaveRequests.filter((r) => r.status === 'pending').length;
 
   const handleApproveLeave = async (req: LeaveRequest) => {
@@ -133,18 +85,18 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
       );
 
       // Automatically update student status in attendance list if student matches
-      setStudents((prev) =>
-        prev.map((s) => {
-          if (s.studentId === req.studentId || s.name === req.studentName || s.thaiName === req.thaiName) {
-            return {
-              ...s,
-              status: 'leave',
-              note: `อนุมัติลา: ${req.reason}`,
-            };
-          }
-          return s;
-        })
-      );
+      const updatedStudents = students.map((s) => {
+        if (s.studentId === req.studentId || s.name === req.studentName || s.thaiName === req.thaiName) {
+          return {
+            ...s,
+            status: 'leave' as const,
+            note: `อนุมัติลา: ${req.reason}`,
+          };
+        }
+        return s;
+      });
+      setStudents(updatedStudents);
+      saveDailyAttendance(updatedStudents);
 
       showToast(`อนุมัติคำขอลาของ ${req.thaiName || req.studentName} เรียบร้อยแล้ว`);
       loadLeaveData();
@@ -232,20 +184,20 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
     const timeNow = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' น.';
     const exactTs = Date.now();
 
-    setStudents((prev) =>
-      prev.map((s) =>
-        s.id === studentId
-          ? {
-              ...s,
-              status: nextStatus,
-              checkInTime:
-                nextStatus === 'present' || nextStatus === 'late'
-                  ? s.checkInTime || timeNow
-                  : undefined,
-            }
-          : s
-      )
+    const updated = students.map((s) =>
+      s.id === studentId
+        ? {
+            ...s,
+            status: nextStatus,
+            checkInTime:
+              nextStatus === 'present' || nextStatus === 'late'
+                ? s.checkInTime || timeNow
+                : undefined,
+          }
+        : s
     );
+    setStudents(updated);
+    saveDailyAttendance(updated);
 
     if (!targetStudent) return;
 
@@ -286,13 +238,13 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
     const timeNow = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' น.';
     const exactTs = Date.now();
 
-    setStudents((prev) =>
-      prev.map((s) => ({
-        ...s,
-        status: 'present',
-        checkInTime: s.checkInTime || timeNow,
-      }))
-    );
+    const updated = students.map((s) => ({
+      ...s,
+      status: 'present' as const,
+      checkInTime: s.checkInTime || timeNow,
+    }));
+    setStudents(updated);
+    saveDailyAttendance(updated);
     showToast('เช็กชื่อ "มาเรียนครบทุกคน" และซิงค์การแจ้งเตือนสดเรียบร้อยแล้ว');
 
     // Notify Parent role
@@ -379,10 +331,14 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
         <div className="absolute -right-10 -bottom-10 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         
         <div className="relative z-10 space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-xs border border-emerald-400/30 flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[16px]">how_to_reg</span>
               <span>ระบบเช็กชื่อเข้าชั้นเรียนแบบเรียลไทม์ (Live Attendance & Roll Call)</span>
+            </span>
+            <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 font-bold text-xs border border-blue-400/30 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>ข้อมูลอัปเดตอัตโนมัติ (Live Auto-Sync)</span>
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">

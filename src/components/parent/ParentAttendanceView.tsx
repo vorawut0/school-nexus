@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../../types';
 import { LeaveRequest, getLeaveRequests, submitLeaveRequest } from '../../services/leaveService';
+import {
+  StudentAttendanceRecord,
+  getStudentAttendanceById,
+} from '../../services/attendanceService';
 
 interface ParentAttendanceViewProps {
   user: UserProfile;
@@ -16,6 +20,9 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [leaveHistory, setLeaveHistory] = useState<LeaveRequest[]>([]);
+  const [studentAttendance, setStudentAttendance] = useState<StudentAttendanceRecord | null>(() => {
+    return getStudentAttendanceById('66041001') || null;
+  });
 
   const loadLeaveData = () => {
     const all = getLeaveRequests();
@@ -29,6 +36,21 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
     };
     window.addEventListener('sn_leave_requests_updated', handleUpdate);
     return () => window.removeEventListener('sn_leave_requests_updated', handleUpdate);
+  }, []);
+
+  // Listen to live attendance auto-updates
+  useEffect(() => {
+    const handleAttendanceChange = () => {
+      const current = getStudentAttendanceById('66041001');
+      if (current) setStudentAttendance(current);
+    };
+
+    window.addEventListener('sn_attendance_updated', handleAttendanceChange);
+    window.addEventListener('storage', handleAttendanceChange);
+    return () => {
+      window.removeEventListener('sn_attendance_updated', handleAttendanceChange);
+      window.removeEventListener('storage', handleAttendanceChange);
+    };
   }, []);
 
   const showToast = (msg: string) => {
@@ -92,9 +114,13 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full bg-[#00694d]/10 text-[#00694d] text-xs font-bold">
                 Parent Portal
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200/60 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>ข้อมูลอัปเดตอัตโนมัติ (Live Auto-Sync)</span>
               </span>
               <span className="text-xs text-[#737686]">
                 ข้อมูลนักเรียนในความดูแล: {user.childName || 'วรวุฒิ เพ็ชรราย'} (ม.6/1)
@@ -207,12 +233,40 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
         {/* Attendance Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col gap-1">
-            <span className="text-[11px] text-[#737686] font-semibold">สถานะวันนี้ (17 ส.ค.)</span>
-            <div className="text-[20px] font-bold text-[#00694d] flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#20C997] animate-pulse"></span>
-              <span>เข้าเรียนแล้ว</span>
+            <span className="text-[11px] text-[#737686] font-semibold flex items-center justify-between">
+              <span>สถานะวันนี้ (วิชา ว33281)</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="อัปเดตอัตโนมัติ" />
+            </span>
+            <div className="text-[18px] sm:text-[20px] font-bold flex items-center gap-1.5">
+              {(!studentAttendance || studentAttendance.status === 'present') ? (
+                <>
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#20C997] animate-pulse"></span>
+                  <span className="text-[#00694d]">เข้าเรียนแล้ว</span>
+                </>
+              ) : studentAttendance.status === 'late' ? (
+                <>
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span className="text-amber-700">เข้าเรียนสาย</span>
+                </>
+              ) : studentAttendance.status === 'leave' ? (
+                <>
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                  <span className="text-blue-700">ลาเรียน (อนุมัติ)</span>
+                </>
+              ) : (
+                <>
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                  <span className="text-rose-700">ยังไม่มาเรียน</span>
+                </>
+              )}
             </div>
-            <span className="text-[11px] text-slate-500 font-mono">แตะประตู 1: 07:42 น.</span>
+            <span className="text-[11px] text-slate-500 font-mono truncate">
+              {studentAttendance?.checkInTime
+                ? `บันทึกเวลา: ${studentAttendance.checkInTime}`
+                : studentAttendance?.note
+                ? studentAttendance.note
+                : 'แตะประตู 1: 07:42 น.'}
+            </span>
           </div>
 
           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col gap-1">
