@@ -3,6 +3,11 @@ import { UserProfile } from '../../types';
 import { pushRealtimeNotification, subscribeToAllUsers, getPersistedAvatar } from '../../services/firebaseService';
 import { ASSETS } from '../../data/mockData';
 import { exportAttendanceToGoogleSheet } from '../../services/googleSheetsService';
+import {
+  LeaveRequest,
+  getLeaveRequests,
+  reviewLeaveRequest,
+} from '../../services/leaveService';
 
 interface StudentAttendanceRecord {
   id: string;
@@ -94,8 +99,82 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
   const [filterStatus, setFilterStatus] = useState<'all' | 'present' | 'late' | 'leave' | 'absent'>('all');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Tab switching: Roll Call vs Leave Requests
+  const [activeTab, setActiveTab] = useState<'attendance' | 'leave-requests'>('attendance');
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [leaveFilter, setLeaveFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+
   // Student Attendance Data dynamically merged from Firestore
   const [students, setStudents] = useState<StudentAttendanceRecord[]>(DEFAULT_CLASS_STUDENTS);
+
+  const loadLeaveData = () => {
+    const list = getLeaveRequests();
+    setLeaveRequests(list);
+  };
+
+  useEffect(() => {
+    loadLeaveData();
+    const handleLeaveUpdate = () => {
+      loadLeaveData();
+    };
+    window.addEventListener('sn_leave_requests_updated', handleLeaveUpdate);
+    return () => window.removeEventListener('sn_leave_requests_updated', handleLeaveUpdate);
+  }, []);
+
+  const pendingLeaveCount = leaveRequests.filter((r) => r.status === 'pending').length;
+
+  const handleApproveLeave = async (req: LeaveRequest) => {
+    try {
+      await reviewLeaveRequest(
+        req.id,
+        'approved',
+        user.thaiName || user.name || 'อ.ดร.สมชาย วิศวกรรม',
+        'อนุมัติการลาเรียบร้อย บันทึกสถานะเข้าเรียนเป็น "ลา"'
+      );
+
+      // Automatically update student status in attendance list if student matches
+      setStudents((prev) =>
+        prev.map((s) => {
+          if (s.studentId === req.studentId || s.name === req.studentName || s.thaiName === req.thaiName) {
+            return {
+              ...s,
+              status: 'leave',
+              note: `อนุมัติลา: ${req.reason}`,
+            };
+          }
+          return s;
+        })
+      );
+
+      showToast(`อนุมัติคำขอลาของ ${req.thaiName || req.studentName} เรียบร้อยแล้ว`);
+      loadLeaveData();
+    } catch (err) {
+      console.error(err);
+      showToast('เกิดข้อผิดพลาดในการอนุมัติ');
+    }
+  };
+
+  const handleRejectLeave = async (req: LeaveRequest) => {
+    const reason = window.prompt(
+      'กรุณาระบุเหตุผลในการไม่อนุมัติ (ถ้ามี):',
+      'หลักฐานไม่เพียงพอ หรือไม่อยู่ในเกณฑ์การลา'
+    );
+    if (reason === null) return;
+
+    try {
+      await reviewLeaveRequest(
+        req.id,
+        'rejected',
+        user.thaiName || user.name || 'อ.ดร.สมชาย วิศวกรรม',
+        reason
+      );
+      showToast(`ปฏิเสธคำขอลาของ ${req.thaiName || req.studentName} เรียบร้อยแล้ว`);
+      loadLeaveData();
+    } catch (err) {
+      console.error(err);
+      showToast('เกิดข้อผิดพลาดในการปฏิเสธคำขอ');
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = subscribeToAllUsers((allUsers) => {
@@ -358,230 +437,506 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
         </div>
       </div>
 
-      {/* Class and Period Selector Strip */}
-      <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-        {/* Class Selection */}
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-bold text-slate-500 shrink-0">เลือกห้องเรียน:</span>
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-            {[
-              { id: 'm6-1', label: 'ม.6/1 (AI & Robotics)' },
-              { id: 'm6-2', label: 'ม.6/2 (Data Science)' },
-              { id: 'm5-1', label: 'ม.5/1 (Mobile Dev)' },
-            ].map((cls) => (
-              <button
-                key={cls.id}
-                onClick={() => setSelectedClass(cls.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
-                  selectedClass === cls.id
-                    ? 'bg-[#1550d3] text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                {cls.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Period Selection */}
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-bold text-slate-500 shrink-0">คาบที่:</span>
-          <div className="flex items-center gap-1">
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((p) => (
-              <button
-                key={p}
-                onClick={() => setSelectedPeriod(p)}
-                className={`w-8 h-8 rounded-xl text-xs font-bold font-mono transition-all cursor-pointer flex items-center justify-center ${
-                  selectedPeriod === p
-                    ? 'bg-[#121b2e] text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Attendance Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
-        <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col">
-          <span className="text-[11px] font-bold text-slate-500 uppercase">เปอร์เซ็นต์เข้าเรียน</span>
-          <div className="flex items-baseline gap-1 mt-1">
-            <span className="text-2xl font-black font-mono text-[#1550d3]">{attendanceRate}%</span>
-            <span className="text-xs text-slate-400">เป้าหมาย &gt;90%</span>
-          </div>
-        </div>
-
-        <div className="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-200 shadow-xs flex flex-col">
-          <span className="text-[11px] font-bold text-emerald-800 uppercase flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            มาเรียนตรงเวลา
-          </span>
-          <div className="text-2xl font-black font-mono text-emerald-700 mt-1">
-            {presentCount} <span className="text-xs font-medium text-emerald-600">คน</span>
-          </div>
-        </div>
-
-        <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200 shadow-xs flex flex-col">
-          <span className="text-[11px] font-bold text-amber-800 uppercase flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-amber-500" />
-            มาสาย
-          </span>
-          <div className="text-2xl font-black font-mono text-amber-700 mt-1">
-            {lateCount} <span className="text-xs font-medium text-amber-600">คน</span>
-          </div>
-        </div>
-
-        <div className="bg-blue-50/70 rounded-2xl p-4 border border-blue-200 shadow-xs flex flex-col">
-          <span className="text-[11px] font-bold text-blue-800 uppercase flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-blue-500" />
-            ลากิจ / ลาป่วย
-          </span>
-          <div className="text-2xl font-black font-mono text-blue-700 mt-1">
-            {leaveCount} <span className="text-xs font-medium text-blue-600">คน</span>
-          </div>
-        </div>
-
-        <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 shadow-xs flex flex-col col-span-2 sm:col-span-1">
-          <span className="text-[11px] font-bold text-rose-800 uppercase flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-rose-500" />
-            ขาดเรียน
-          </span>
-          <div className="text-2xl font-black font-mono text-rose-700 mt-1">
-            {absentCount} <span className="text-xs font-medium text-rose-600">คน</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-2">
-        {(['all', 'present', 'late', 'leave', 'absent'] as const).map((st) => (
+      {/* Tab Switcher */}
+      <div className="flex items-center justify-between border-b border-slate-200 pb-3 flex-wrap gap-3">
+        <div className="flex items-center gap-2">
           <button
-            key={st}
-            onClick={() => setFilterStatus(st)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              filterStatus === st
-                ? 'bg-[#121b2e] text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            onClick={() => setActiveTab('attendance')}
+            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'attendance'
+                ? 'bg-[#1550d3] text-white shadow-md'
+                : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
             }`}
           >
-            {st === 'all' && `ทั้งหมด (${students.length})`}
-            {st === 'present' && `มาเรียน (${presentCount})`}
-            {st === 'late' && `มาสาย (${lateCount})`}
-            {st === 'leave' && `ลา (${leaveCount})`}
-            {st === 'absent' && `ขาด (${absentCount})`}
+            <span className="material-symbols-outlined text-[18px]">checklist</span>
+            <span>เช็กชื่อในชั้นเรียน (Live Roll Call)</span>
           </button>
-        ))}
+
+          <button
+            onClick={() => setActiveTab('leave-requests')}
+            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer relative ${
+              activeTab === 'leave-requests'
+                ? 'bg-[#1550d3] text-white shadow-md'
+                : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">event_busy</span>
+            <span>คำร้องขอลาเรียน (Leave Requests)</span>
+            {pendingLeaveCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white font-bold text-[11px] animate-pulse">
+                {pendingLeaveCount} รออนุมัติ
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* Students Roll Call List */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
-        {filteredStudents.map((std, idx) => (
-          <div
-            key={std.id}
-            className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors"
-          >
-            {/* Student Info */}
-            <div className="flex items-center gap-3.5">
-              <span className="font-mono text-xs font-bold text-slate-400 w-5 text-center">
-                {idx + 1}
-              </span>
-              <div className="relative">
-                <img
-                  src={std.avatar}
-                  alt={std.name}
-                  className="w-12 h-12 rounded-2xl object-cover ring-2 ring-slate-100 shadow-xs"
-                />
-                <span
-                  className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full ring-2 ring-white ${
-                    std.status === 'present'
-                      ? 'bg-emerald-500'
-                      : std.status === 'late'
-                      ? 'bg-amber-500'
-                      : std.status === 'leave'
-                      ? 'bg-blue-500'
-                      : 'bg-rose-500'
-                  }`}
-                />
+      {activeTab === 'attendance' ? (
+        <>
+          {/* Pending Leave Banner Alert if any */}
+          {pendingLeaveCount > 0 && (
+            <div
+              onClick={() => setActiveTab('leave-requests')}
+              className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 shadow-xs flex items-center justify-between gap-3 cursor-pointer hover:shadow-md transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs group-hover:scale-105 transition-transform">
+                  <span className="material-symbols-outlined text-[22px]">notification_important</span>
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-amber-950 flex items-center gap-1.5">
+                    <span>มีคำร้องขอลาเรียนรอให้อาจารย์พิจารณา {pendingLeaveCount} รายการ</span>
+                    <span className="px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 text-[10px] font-bold">รออนุมัติ</span>
+                  </h4>
+                  <p className="text-xs text-amber-800 mt-0.5">
+                    คลิกที่นี่เพื่อตรวจสอบหลักฐานใบรับรองแพทย์ และกดอนุมัติการลา (ระบบจะปรับสถานะเข้าเรียนให้อัตโนมัติ)
+                  </p>
+                </div>
               </div>
+              <span className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shrink-0 flex items-center gap-1 shadow-xs">
+                <span>พิจารณาคำขอ</span>
+                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+              </span>
+            </div>
+          )}
 
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="font-bold text-sm text-slate-900">{std.thaiName}</h4>
-                  <span className="text-xs font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                    {std.studentId}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                  <span>{std.name}</span>
-                  {std.checkInTime && (
-                    <>
-                      <span>•</span>
-                      <span className="font-mono text-emerald-600 font-semibold flex items-center gap-0.5">
-                        <span className="material-symbols-outlined text-[13px]">schedule</span>
-                        {std.checkInTime}
-                      </span>
-                    </>
-                  )}
-                  {std.note && (
-                    <>
-                      <span>•</span>
-                      <span className="text-amber-700 italic">({std.note})</span>
-                    </>
-                  )}
-                </div>
+          {/* Class and Period Selector Strip */}
+          <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+            {/* Class Selection */}
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-slate-500 shrink-0">เลือกห้องเรียน:</span>
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                {[
+                  { id: 'm6-1', label: 'ม.6/1 (AI & Robotics)' },
+                  { id: 'm6-2', label: 'ม.6/2 (Data Science)' },
+                  { id: 'm5-1', label: 'ม.5/1 (Mobile Dev)' },
+                ].map((cls) => (
+                  <button
+                    key={cls.id}
+                    onClick={() => setSelectedClass(cls.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                      selectedClass === cls.id
+                        ? 'bg-[#1550d3] text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {cls.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Status Buttons Group */}
-            <div className="flex items-center gap-1.5 self-end sm:self-center">
-              <button
-                onClick={() => toggleStudentStatus(std.id, 'present')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  std.status === 'present'
-                    ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400/30'
-                    : 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
-                }`}
-              >
-                มา
-              </button>
-              <button
-                onClick={() => toggleStudentStatus(std.id, 'late')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  std.status === 'late'
-                    ? 'bg-amber-500 text-white shadow-xs ring-2 ring-amber-400/30'
-                    : 'bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
-                }`}
-              >
-                สาย
-              </button>
-              <button
-                onClick={() => toggleStudentStatus(std.id, 'leave')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  std.status === 'leave'
-                    ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400/30'
-                    : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700'
-                }`}
-              >
-                ลา
-              </button>
-              <button
-                onClick={() => toggleStudentStatus(std.id, 'absent')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  std.status === 'absent'
-                    ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-400/30'
-                    : 'bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
-                }`}
-              >
-                ขาด
-              </button>
+            {/* Period Selection */}
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-slate-500 shrink-0">คาบที่:</span>
+              <div className="flex items-center gap-1">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setSelectedPeriod(p)}
+                    className={`w-8 h-8 rounded-xl text-xs font-bold font-mono transition-all cursor-pointer flex items-center justify-center ${
+                      selectedPeriod === p
+                        ? 'bg-[#121b2e] text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        ))}
-      </div>
+
+          {/* Attendance Stats Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col">
+              <span className="text-[11px] font-bold text-slate-500 uppercase">เปอร์เซ็นต์เข้าเรียน</span>
+              <div className="flex items-baseline gap-1 mt-1">
+                <span className="text-2xl font-black font-mono text-[#1550d3]">{attendanceRate}%</span>
+                <span className="text-xs text-slate-400">เป้าหมาย &gt;90%</span>
+              </div>
+            </div>
+
+            <div className="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-200 shadow-xs flex flex-col">
+              <span className="text-[11px] font-bold text-emerald-800 uppercase flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                มาเรียนตรงเวลา
+              </span>
+              <div className="text-2xl font-black font-mono text-emerald-700 mt-1">
+                {presentCount} <span className="text-xs font-medium text-emerald-600">คน</span>
+              </div>
+            </div>
+
+            <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200 shadow-xs flex flex-col">
+              <span className="text-[11px] font-bold text-amber-800 uppercase flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                มาสาย
+              </span>
+              <div className="text-2xl font-black font-mono text-amber-700 mt-1">
+                {lateCount} <span className="text-xs font-medium text-amber-600">คน</span>
+              </div>
+            </div>
+
+            <div className="bg-blue-50/70 rounded-2xl p-4 border border-blue-200 shadow-xs flex flex-col">
+              <span className="text-[11px] font-bold text-blue-800 uppercase flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                ลากิจ / ลาป่วย
+              </span>
+              <div className="text-2xl font-black font-mono text-blue-700 mt-1">
+                {leaveCount} <span className="text-xs font-medium text-blue-600">คน</span>
+              </div>
+            </div>
+
+            <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 shadow-xs flex flex-col col-span-2 sm:col-span-1">
+              <span className="text-[11px] font-bold text-rose-800 uppercase flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-rose-500" />
+                ขาดเรียน
+              </span>
+              <div className="text-2xl font-black font-mono text-rose-700 mt-1">
+                {absentCount} <span className="text-xs font-medium text-rose-600">คน</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="flex items-center gap-2">
+            {(['all', 'present', 'late', 'leave', 'absent'] as const).map((st) => (
+              <button
+                key={st}
+                onClick={() => setFilterStatus(st)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  filterStatus === st
+                    ? 'bg-[#121b2e] text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                {st === 'all' && `ทั้งหมด (${students.length})`}
+                {st === 'present' && `มาเรียน (${presentCount})`}
+                {st === 'late' && `มาสาย (${lateCount})`}
+                {st === 'leave' && `ลา (${leaveCount})`}
+                {st === 'absent' && `ขาด (${absentCount})`}
+              </button>
+            ))}
+          </div>
+
+          {/* Students Roll Call List */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
+            {filteredStudents.map((std, idx) => (
+              <div
+                key={std.id}
+                className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors"
+              >
+                {/* Student Info */}
+                <div className="flex items-center gap-3.5">
+                  <span className="font-mono text-xs font-bold text-slate-400 w-5 text-center">
+                    {idx + 1}
+                  </span>
+                  <div className="relative">
+                    <img
+                      src={std.avatar}
+                      alt={std.name}
+                      className="w-12 h-12 rounded-2xl object-cover ring-2 ring-slate-100 shadow-xs"
+                    />
+                    <span
+                      className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full ring-2 ring-white ${
+                        std.status === 'present'
+                          ? 'bg-emerald-500'
+                          : std.status === 'late'
+                          ? 'bg-amber-500'
+                          : std.status === 'leave'
+                          ? 'bg-blue-500'
+                          : 'bg-rose-500'
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-sm text-slate-900">{std.thaiName}</h4>
+                      <span className="text-xs font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {std.studentId}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                      <span>{std.name}</span>
+                      {std.checkInTime && (
+                        <>
+                          <span>•</span>
+                          <span className="font-mono text-emerald-600 font-semibold flex items-center gap-0.5">
+                            <span className="material-symbols-outlined text-[13px]">schedule</span>
+                            {std.checkInTime}
+                          </span>
+                        </>
+                      )}
+                      {std.note && (
+                        <>
+                          <span>•</span>
+                          <span className="text-amber-700 italic">({std.note})</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status Buttons Group */}
+                <div className="flex items-center gap-1.5 self-end sm:self-center">
+                  <button
+                    onClick={() => toggleStudentStatus(std.id, 'present')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      std.status === 'present'
+                        ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400/30'
+                        : 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+                    }`}
+                  >
+                    มา
+                  </button>
+                  <button
+                    onClick={() => toggleStudentStatus(std.id, 'late')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      std.status === 'late'
+                        ? 'bg-amber-500 text-white shadow-xs ring-2 ring-amber-400/30'
+                        : 'bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
+                    }`}
+                  >
+                    สาย
+                  </button>
+                  <button
+                    onClick={() => toggleStudentStatus(std.id, 'leave')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      std.status === 'leave'
+                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400/30'
+                        : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700'
+                    }`}
+                  >
+                    ลา
+                  </button>
+                  <button
+                    onClick={() => toggleStudentStatus(std.id, 'absent')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      std.status === 'absent'
+                        ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-400/30'
+                        : 'bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
+                    }`}
+                  >
+                    ขาด
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        /* Leave Requests Management View */
+        <div className="space-y-6">
+          {/* Leave Stats Summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col">
+              <span className="text-[11px] font-bold text-slate-500 uppercase">คำขอทั้งหมด</span>
+              <div className="text-2xl font-black font-mono text-slate-900 mt-1">
+                {leaveRequests.length} <span className="text-xs font-normal text-slate-500">รายการ</span>
+              </div>
+            </div>
+
+            <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200 shadow-xs flex flex-col">
+              <span className="text-[11px] font-bold text-amber-800 uppercase flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                รอการพิจารณา
+              </span>
+              <div className="text-2xl font-black font-mono text-amber-800 mt-1">
+                {pendingLeaveCount} <span className="text-xs font-normal text-amber-700">รายการ</span>
+              </div>
+            </div>
+
+            <div className="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-200 shadow-xs flex flex-col">
+              <span className="text-[11px] font-bold text-emerald-800 uppercase flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                อนุมัติแล้ว
+              </span>
+              <div className="text-2xl font-black font-mono text-emerald-800 mt-1">
+                {leaveRequests.filter((r) => r.status === 'approved').length} <span className="text-xs font-normal text-emerald-700">รายการ</span>
+              </div>
+            </div>
+
+            <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 shadow-xs flex flex-col">
+              <span className="text-[11px] font-bold text-rose-800 uppercase flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-rose-500" />
+                ไม่อนุมัติ
+              </span>
+              <div className="text-2xl font-black font-mono text-rose-800 mt-1">
+                {leaveRequests.filter((r) => r.status === 'rejected').length} <span className="text-xs font-normal text-rose-700">รายการ</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-2">
+            {(['all', 'pending', 'approved', 'rejected'] as const).map((filterKey) => (
+              <button
+                key={filterKey}
+                onClick={() => setLeaveFilter(filterKey)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  leaveFilter === filterKey
+                    ? 'bg-[#121b2e] text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                {filterKey === 'all' && `ทั้งหมด (${leaveRequests.length})`}
+                {filterKey === 'pending' && `รออนุมัติ (${pendingLeaveCount})`}
+                {filterKey === 'approved' && `อนุมัติแล้ว (${leaveRequests.filter((r) => r.status === 'approved').length})`}
+                {filterKey === 'rejected' && `ไม่อนุมัติ (${leaveRequests.filter((r) => r.status === 'rejected').length})`}
+              </button>
+            ))}
+          </div>
+
+          {/* Request List */}
+          <div className="space-y-4">
+            {leaveRequests
+              .filter((req) => (leaveFilter === 'all' ? true : req.status === leaveFilter))
+              .map((req) => (
+                <div
+                  key={req.id}
+                  className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm hover:border-blue-300 transition-all space-y-4"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-3.5">
+                      <img
+                        src={
+                          req.studentAvatar ||
+                          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300'
+                        }
+                        alt={req.studentName}
+                        className="w-12 h-12 rounded-2xl object-cover ring-2 ring-slate-100 shadow-xs"
+                      />
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-bold text-base text-slate-900">
+                            {req.thaiName || req.studentName}
+                          </h4>
+                          <span className="text-xs font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-600">
+                            {req.studentId}
+                          </span>
+                          <span className="text-xs font-medium text-slate-500">
+                            {req.className}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          ยื่นคำร้องเมื่อ {req.submittedDate} • โดย{' '}
+                          {req.submittedByRole === 'parent' ? 'ผู้ปกครอง' : 'นักเรียน'}
+                          {req.parentContact && ` (${req.parentContact})`}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-start sm:self-center">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1 ${
+                          req.type === 'sick'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : req.type === 'personal'
+                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            : 'bg-blue-50 text-blue-700 border-blue-200'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[15px]">
+                          {req.type === 'sick' ? 'local_hospital' : req.type === 'personal' ? 'person' : 'emoji_events'}
+                        </span>
+                        <span>{req.type === 'sick' ? 'ลาป่วย' : req.type === 'personal' ? 'ลากิจส่วนตัว' : 'ราชการ/กิจกรรม'}</span>
+                      </span>
+
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1 ${
+                          req.status === 'approved'
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : req.status === 'pending'
+                            ? 'bg-amber-100 text-amber-800 border-amber-300 animate-pulse'
+                            : 'bg-rose-100 text-rose-800 border-rose-300'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[15px]">
+                          {req.status === 'approved' ? 'task_alt' : req.status === 'pending' ? 'hourglass_empty' : 'cancel'}
+                        </span>
+                        <span>{req.status === 'approved' ? 'อนุมัติแล้ว' : req.status === 'pending' ? 'รอพิจารณา' : 'ไม่อนุมัติ'}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Date and Reason */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs sm:text-sm">
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                      <span className="text-slate-400 font-bold block text-[11px]">ระยะเวลาที่ขอลา:</span>
+                      <span className="font-bold text-slate-800 mt-1 block">
+                        {req.startDate === req.endDate
+                          ? `วันที่ ${req.startDate}`
+                          : `${req.startDate} ถึง ${req.endDate}`}
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 md:col-span-2">
+                      <span className="text-slate-400 font-bold block text-[11px]">เหตุผลความจำเป็น:</span>
+                      <p className="font-medium text-slate-800 mt-1">{req.reason}</p>
+                    </div>
+                  </div>
+
+                  {/* Attachment if present */}
+                  {req.hasAttachment && (
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/70 border border-blue-100 text-xs">
+                      <div className="flex items-center gap-2 text-blue-900">
+                        <span className="material-symbols-outlined text-[20px] text-blue-600">
+                          attach_file
+                        </span>
+                        <span className="font-semibold">
+                          เอกสารแนบ: {req.attachmentName || 'ใบรับรองแพทย์ / เอกสารหลักฐาน'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => showToast(`กำลังเปิดดูตัวอย่างไฟล์: ${req.attachmentName || 'เอกสารแนบ'}`)}
+                        className="px-3 py-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs cursor-pointer"
+                      >
+                        ดูเอกสารแนบ
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Review result or Action buttons */}
+                  {req.status === 'pending' ? (
+                    <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                      <button
+                        onClick={() => handleRejectLeave(req)}
+                        className="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                        <span>ไม่อนุมัติ</span>
+                      </button>
+                      <button
+                        onClick={() => handleApproveLeave(req)}
+                        className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                        <span>อนุมัติการลา (ซิงค์สถานะเข้าเรียน)</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-xs p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                      <div className="text-slate-600">
+                        <span className="font-bold text-slate-800">พิจารณาโดย: </span>
+                        {req.reviewedBy} ({req.reviewedAt})
+                        {req.reviewNote && (
+                          <span className="italic ml-2 text-slate-500">
+                            — หมายเหตุ: "{req.reviewNote}"
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[16px]">done_all</span>
+                        แจ้งเตือนไปยังผู้ปกครองและนักเรียนแล้ว
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

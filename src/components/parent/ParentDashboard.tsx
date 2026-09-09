@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserProfile, Assignment } from '../../types';
 import { ASSETS } from '../../data/mockData';
+import { DirectMessageModal } from '../modals/DirectMessageModal';
+import { getTotalUnreadMessages } from '../../services/messageService';
 
 interface ParentDashboardProps {
   user: UserProfile;
@@ -16,7 +18,18 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
   onOpenAITutor,
 }) => {
   const [showAdvisorModal, setShowAdvisorModal] = useState(false);
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const updateUnread = () => {
+      setUnreadChatCount(getTotalUnreadMessages('parent'));
+    };
+    updateUnread();
+    window.addEventListener('sn_messages_updated', updateUnread);
+    return () => window.removeEventListener('sn_messages_updated', updateUnread);
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -92,6 +105,19 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
 
             {/* Quick Actions Buttons in Banner */}
             <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-white/10">
+              <button
+                onClick={() => setShowChatModal(true)}
+                className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-blue-500/25 transition-all cursor-pointer active:scale-95 relative"
+              >
+                <span className="material-symbols-outlined text-[18px]">forum</span>
+                <span>แชทกับครูที่ปรึกษา</span>
+                {unreadChatCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono text-[10px] font-bold animate-pulse">
+                    {unreadChatCount}
+                  </span>
+                )}
+              </button>
+
               <button
                 onClick={() => onNavigateTab('parent-attendance')}
                 className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-1.5 border border-white/20 backdrop-blur-sm transition-all cursor-pointer shadow-sm active:scale-95"
@@ -412,18 +438,26 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
                 <button
                   onClick={() => {
                     setShowAdvisorModal(false);
-                    showToast('ระบบส่งข้อความแจ้งเตือนขอคำปรึกษาไปยังอาจารย์ประจำชั้นแล้ว');
+                    setShowChatModal(true);
                   }}
-                  className="w-full py-3 rounded-xl bg-[#1550d3] hover:bg-[#1a53d6] text-white font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                  className="w-full py-3 rounded-xl bg-[#1550d3] hover:bg-[#1a53d6] text-white font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-98 transition-all"
                 >
-                  <span className="material-symbols-outlined text-[18px]">chat</span>
-                  <span>ส่งข้อความนัดหมายพูดคุย</span>
+                  <span className="material-symbols-outlined text-[18px]">forum</span>
+                  <span>เปิดกล่องสนทนาและส่งข้อความหาครู</span>
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* Direct Messaging Modal */}
+      <DirectMessageModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        currentUser={user}
+        initialThreadId="thread-vorawut"
+      />
     </div>
   );
 };

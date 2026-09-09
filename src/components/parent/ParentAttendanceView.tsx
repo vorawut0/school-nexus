@@ -1,34 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../../types';
-import { pushRealtimeNotification } from '../../services/firebaseService';
+import { LeaveRequest, getLeaveRequests, submitLeaveRequest } from '../../services/leaveService';
 
 interface ParentAttendanceViewProps {
   user: UserProfile;
 }
-
-interface LeaveRequest {
-  id: string;
-  type: 'sick' | 'personal' | 'official';
-  startDate: string;
-  endDate: string;
-  reason: string;
-  status: 'approved' | 'pending' | 'rejected';
-  submittedDate: string;
-  hasAttachment: boolean;
-}
-
-const INITIAL_LEAVE_HISTORY: LeaveRequest[] = [
-  {
-    id: 'leave-1',
-    type: 'sick',
-    startDate: '10 ส.ค. 2026',
-    endDate: '10 ส.ค. 2026',
-    reason: 'มีไข้และพบแพทย์ตามนัดหมาย',
-    status: 'approved',
-    submittedDate: '10 ส.ค. 2026 07:15 น.',
-    hasAttachment: true,
-  }
-];
 
 export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user }) => {
   const [showLeaveForm, setShowLeaveForm] = useState(false);
@@ -39,20 +15,20 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
   const [attachedFileName, setAttachedFileName] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const [leaveHistory, setLeaveHistory] = useState<LeaveRequest[]>(INITIAL_LEAVE_HISTORY);
+  const [leaveHistory, setLeaveHistory] = useState<LeaveRequest[]>([]);
+
+  const loadLeaveData = () => {
+    const all = getLeaveRequests();
+    setLeaveHistory(all);
+  };
 
   useEffect(() => {
-    const handleReset = () => {
-      setLeaveHistory(INITIAL_LEAVE_HISTORY);
-      setShowLeaveForm(false);
-      setLeaveReason('');
-      setStartDate('');
-      setEndDate('');
+    loadLeaveData();
+    const handleUpdate = () => {
+      loadLeaveData();
     };
-    window.addEventListener('sn_system_full_reset', handleReset);
-    return () => {
-      window.removeEventListener('sn_system_full_reset', handleReset);
-    };
+    window.addEventListener('sn_leave_requests_updated', handleUpdate);
+    return () => window.removeEventListener('sn_leave_requests_updated', handleUpdate);
   }, []);
 
   const showToast = (msg: string) => {
@@ -73,56 +49,33 @@ export const ParentAttendanceView: React.FC<ParentAttendanceViewProps> = ({ user
       return;
     }
 
-    const leaveTypeThai = leaveType === 'sick' ? 'ลาป่วย' : leaveType === 'personal' ? 'ลากิจส่วนตัว' : 'ไปราชการ/กิจกรรม';
+    try {
+      await submitLeaveRequest({
+        studentId: '66041001',
+        studentName: user.childName || 'Vorawut Phetrai',
+        thaiName: user.childName || 'วรวุฒิ เพ็ชรราย',
+        className: 'ม.6/1 (AI & Robotics)',
+        type: leaveType,
+        startDate: startDate,
+        endDate: endDate || startDate,
+        reason: leaveReason,
+        hasAttachment: !!attachedFileName,
+        attachmentName: attachedFileName || undefined,
+        submittedByRole: 'parent',
+        parentContact: user.phone || '081-992-4411',
+      });
 
-    const newReq: LeaveRequest = {
-      id: `leave-${Date.now()}`,
-      type: leaveType,
-      startDate: startDate,
-      endDate: endDate || startDate,
-      reason: leaveReason,
-      status: 'pending',
-      submittedDate: new Date().toLocaleDateString('th-TH', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }) + ' น.',
-      hasAttachment: !!attachedFileName,
-    };
-
-    setLeaveHistory([newReq, ...leaveHistory]);
-    setShowLeaveForm(false);
-    setLeaveReason('');
-    setStartDate('');
-    setEndDate('');
-    setAttachedFileName(null);
-    showToast('ส่งคำร้องขอลาเรียนถึงอาจารย์ที่ปรึกษาและซิงค์การแจ้งเตือนสดเรียบร้อยแล้ว');
-
-    // 1. Real-time Notification for TEACHER
-    const nowTs = Date.now();
-    const currentTimeStr = new Date(nowTs).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' น.';
-    await pushRealtimeNotification({
-      title: '📋 มีคำขอลาหยุดเรียนใหม่ (จากผู้ปกครอง)',
-      message: `ผู้ปกครองของ นายวรวุฒิ เพ็ชรราย ยื่นขอ${leaveTypeThai} วันที่ ${startDate} (เหตุผล: "${leaveReason}") • เวลาที่ยื่น: ${currentTimeStr}`,
-      type: 'attendance',
-      priority: 'high',
-      role: 'teacher',
-      icon: 'event_busy',
-      timestamp: nowTs,
-    });
-
-    // 2. Real-time Notification for STUDENT
-    await pushRealtimeNotification({
-      title: '📋 ผู้ปกครองยื่นขอลาเรียนให้คุณแล้ว',
-      message: `บันทึกคำขอ${leaveTypeThai} วันที่ ${startDate} ส่งถึงอาจารย์ที่ปรึกษาเรียบร้อยแล้ว (เวลา ${currentTimeStr})`,
-      type: 'attendance',
-      priority: 'normal',
-      role: 'student',
-      icon: 'event_busy',
-      timestamp: nowTs,
-    });
+      setShowLeaveForm(false);
+      setLeaveReason('');
+      setStartDate('');
+      setEndDate('');
+      setAttachedFileName(null);
+      showToast('ส่งคำร้องขอลาเรียนถึงอาจารย์ที่ปรึกษาและซิงค์การแจ้งเตือนสดเรียบร้อยแล้ว');
+      loadLeaveData();
+    } catch (err) {
+      console.error(err);
+      showToast('เกิดข้อผิดพลาดในการส่งคำขอ');
+    }
   };
 
   return (

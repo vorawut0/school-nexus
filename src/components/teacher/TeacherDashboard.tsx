@@ -1,10 +1,12 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { UserProfile, ScheduleItem } from '../../types';
 import { WEEKLY_TEACHER_SCHEDULE, ASSETS } from '../../data/mockData';
 import { GoogleSheetsManager } from './GoogleSheetsManager';
 import { GoogleSheetSyncIndicator } from './GoogleSheetSyncIndicator';
 import { AssignmentRubric, SheetPollResult } from '../../services/googleSheetsService';
 import { StudentWorkViewerModal, StudentWorkViewerData } from './StudentWorkViewerModal';
+import { DirectMessageModal } from '../modals/DirectMessageModal';
+import { getTotalUnreadMessages } from '../../services/messageService';
 
 interface TeacherDashboardProps {
   user: UserProfile;
@@ -64,7 +66,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     'https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit'
   );
   const [syncUpdateAlert, setSyncUpdateAlert] = useState<SheetPollResult | null>(null);
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [chatThreadId, setChatThreadId] = useState<string | undefined>(undefined);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const sheetsSectionRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const updateUnread = () => {
+      setUnreadChatCount(getTotalUnreadMessages('teacher'));
+    };
+    updateUnread();
+    window.addEventListener('sn_messages_updated', updateUnread);
+    return () => window.removeEventListener('sn_messages_updated', updateUnread);
+  }, []);
 
   const scrollToSheets = () => {
     sheetsSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -308,6 +322,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             >
               <span className="material-symbols-outlined text-[18px]">fact_check</span>
               <span>ตรวจงาน ({submissionsQueue.filter((s) => s.status === 'pending').length})</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setChatThreadId(undefined);
+                setShowChatModal(true);
+              }}
+              className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all cursor-pointer relative"
+              title="เปิดกล่องข้อความพูดคุยและตอบคำถามผู้ปกครอง"
+            >
+              <span className="material-symbols-outlined text-[18px]">forum</span>
+              <span>แชทผู้ปกครอง</span>
+              {unreadChatCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono text-[10px] font-bold animate-pulse">
+                  {unreadChatCount}
+                </span>
+              )}
             </button>
 
             <button
@@ -641,16 +672,33 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">{alt.message}</p>
 
                 {/* Alert Action buttons */}
-                <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between gap-2">
+                <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between gap-1.5 flex-wrap">
                   {alt.parentPhone && (
                     <a
                       href={`tel:${alt.parentPhone}`}
                       className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-800 font-semibold text-[11px] border border-slate-200 flex items-center gap-1 shadow-2xs"
                     >
                       <span className="material-symbols-outlined text-[14px] text-blue-600">call</span>
-                      <span>โทรหาผู้ปกครอง</span>
+                      <span>โทร</span>
                     </a>
                   )}
+
+                  <button
+                    onClick={() => {
+                      const thrId = alt.studentName.includes('วรวุฒิ')
+                        ? 'thread-vorawut'
+                        : alt.studentName.includes('ภานุวัฒน์')
+                        ? 'thread-panuwat'
+                        : 'thread-nichanan';
+                      setChatThreadId(thrId);
+                      setShowChatModal(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-[11px] border border-blue-200 flex items-center gap-1 cursor-pointer transition-colors"
+                    title="เปิดแชทกับผู้ปกครองของนักเรียนคนนี้"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">chat</span>
+                    <span>แชท</span>
+                  </button>
 
                   {alt.type === 'leave_request' && (
                     <button
@@ -667,7 +715,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     onClick={() => handleActionAlert(alt.id, 'รับทราบสถานะ')}
                     className="ml-auto text-[11px] font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
                   >
-                    {alt.status === 'actioned' ? '✓ ดำเนินการแล้ว' : 'ทำเครื่องหมายว่าอ่านแล้ว'}
+                    {alt.status === 'actioned' ? '✓ ดำเนินการแล้ว' : 'อ่านแล้ว'}
                   </button>
                 </div>
               </div>
@@ -1044,6 +1092,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           }}
         />
       )}
+
+      {/* Direct Messaging with Parents Modal */}
+      <DirectMessageModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        currentUser={user}
+        initialThreadId={chatThreadId}
+      />
     </div>
   );
 };
