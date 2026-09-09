@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, setPersistence, browserSessionPersistence, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
 import { initializeFirestore, getFirestore, setLogLevel, doc, getDocFromServer, Firestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -63,7 +63,7 @@ export const db: Firestore = (() => {
 export const auth = getAuth(app);
 if (typeof window !== 'undefined') {
   try {
-    setPersistence(auth, browserLocalPersistence).catch(() => {});
+    setPersistence(auth, browserSessionPersistence).catch(() => {});
   } catch {
     // ignore
   }

@@ -85,66 +85,61 @@ import {
 } from './services/firebaseService';
 
 export default function App() {
-  // Clear any legacy auto lock flags on load
+  // Clear any persistent active login tokens on load to guarantee that leaving the webpage without logging out
+  // will strictly require logging in every time the site is visited.
   try {
     localStorage.removeItem('sn_is_auto_locked');
     localStorage.removeItem('sn_locked_user');
+    localStorage.removeItem('sn_active_user');
+    localStorage.removeItem('sn_user_profile');
+    localStorage.removeItem('sn_last_active_user');
   } catch {
     // ignore
   }
 
-  // Session persistence across page refreshes, tab exits, and browser re-launches
+  // Session-only persistence:
+  // If the user refreshed the active tab, preserve the in-flight session in sessionStorage.
+  // If the user closed or left the webpage, sessionStorage is discarded by the browser,
+  // automatically requiring login on every new visit!
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
-      const explicitLogout = localStorage.getItem('sn_logout_explicit') === 'true';
-      if (explicitLogout) {
-        return null;
-      }
-
-      // 1. Check local cache helper
-      const cached = getLocalCache<UserProfile | null>('sn_active_user', null);
-      if (cached && cached.id) {
-        const customAvatar = getPersistedAvatar(cached);
-        const customTheme = getPersistedCardTheme(cached);
-        return {
-          ...cached,
-          avatar: customAvatar || cached.avatar,
-          cardTheme: customTheme || cached.cardTheme || 'obsidian-gold',
-        };
-      }
-
-      // 2. Check direct localStorage keys
-      const rawUser =
-        localStorage.getItem('sn_active_user') ||
-        localStorage.getItem('sn_user_profile') ||
-        localStorage.getItem('sn_last_active_user') ||
-        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sn_active_user') : null);
-
-      if (rawUser) {
-        const parsed = JSON.parse(rawUser) as UserProfile;
-        if (parsed && parsed.id) {
-          const customAvatar = getPersistedAvatar(parsed);
-          const customTheme = getPersistedCardTheme(parsed);
-          return {
-            ...parsed,
-            avatar: customAvatar || parsed.avatar,
-            cardTheme: customTheme || parsed.cardTheme || 'obsidian-gold',
-          };
+      // Check if current page load is a refresh vs new navigation/visit
+      let isPageReload = false;
+      try {
+        const navEntries = performance.getEntriesByType('navigation');
+        if (navEntries.length > 0) {
+          const navTiming = navEntries[0] as PerformanceNavigationTiming;
+          isPageReload = navTiming.type === 'reload';
+        } else if ((performance as any).navigation) {
+          isPageReload = (performance as any).navigation.type === 1;
         }
+      } catch {
+        // fallback
       }
 
-      // 3. Check latest stored/registered account if user hasn't explicitly logged out
-      const registeredList = getStoredAccounts();
-      if (registeredList && registeredList.length > 0) {
-        const latestAccount = registeredList[0].user;
-        if (latestAccount && latestAccount.id) {
-          const customAvatar = getPersistedAvatar(latestAccount);
-          const customTheme = getPersistedCardTheme(latestAccount);
-          return {
-            ...latestAccount,
-            avatar: customAvatar || latestAccount.avatar,
-            cardTheme: customTheme || latestAccount.cardTheme || 'obsidian-gold',
-          };
+      if (typeof sessionStorage !== 'undefined') {
+        // If this is a new navigation (opened URL, new tab, came back to page after leaving),
+        // clear session so user must log in every time
+        if (!isPageReload) {
+          sessionStorage.removeItem('sn_session_active');
+          sessionStorage.removeItem('sn_session_user');
+          sessionStorage.removeItem('sn_active_user');
+          return null;
+        }
+
+        const sessionActive = sessionStorage.getItem('sn_session_active');
+        const sessionUserRaw = sessionStorage.getItem('sn_session_user') || sessionStorage.getItem('sn_active_user');
+        if (sessionActive === 'true' && sessionUserRaw) {
+          const parsed = JSON.parse(sessionUserRaw) as UserProfile;
+          if (parsed && parsed.id) {
+            const customAvatar = getPersistedAvatar(parsed);
+            const customTheme = getPersistedCardTheme(parsed);
+            return {
+              ...parsed,
+              avatar: customAvatar || parsed.avatar,
+              cardTheme: customTheme || parsed.cardTheme || 'obsidian-gold',
+            };
+          }
         }
       }
     } catch {
@@ -218,29 +213,43 @@ export default function App() {
     }
   }, [currentTab]);
 
-  // Synchronize active user to localStorage and sessionStorage for permanent cross-tab and re-open persistence
+  // Synchronize active user strictly within sessionStorage for the current session
+  // When the user closes or exits the webpage without logging out, the session is cleared automatically
   useEffect(() => {
     try {
       if (user) {
-        localStorage.removeItem('sn_logout_explicit');
-        localStorage.setItem('sn_active_user', JSON.stringify(user));
-        localStorage.setItem('sn_last_active_user', JSON.stringify(user));
-        localStorage.setItem('sn_user_profile', JSON.stringify(user));
         if (typeof sessionStorage !== 'undefined') {
-          sessionStorage.setItem('sn_active_user', JSON.stringify(user));
+          sessionStorage.setItem('sn_session_active', 'true');
+          sessionStorage.setItem('sn_session_user', JSON.stringify(user));
         }
-        setLocalCache('sn_active_user', user);
+        // Remove active user keys from localStorage to guarantee that exiting the page requires login
+        localStorage.removeItem('sn_active_user');
+        localStorage.removeItem('sn_user_profile');
+        localStorage.removeItem('sn_last_active_user');
+        localStorage.removeItem('sn_logout_explicit');
+        setLocalCache('sn_active_user', null);
+      } else {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem('sn_session_active');
+          sessionStorage.removeItem('sn_session_user');
+          sessionStorage.removeItem('sn_active_user');
+        }
       }
     } catch {
       // ignore
     }
   }, [user]);
 
-  // Auto-restore session from Firebase Auth when the page or link is opened
+  // Synchronize with Firebase Auth only during an authenticated active session
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
-      const isExplicitLogout = localStorage.getItem('sn_logout_explicit') === 'true';
-      if (isExplicitLogout) return;
+      const isSessionActive = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sn_session_active') === 'true';
+      if (!isSessionActive) {
+        if (firebaseUser) {
+          auth.signOut().catch(() => {});
+        }
+        return;
+      }
 
       if (firebaseUser && firebaseUser.email) {
         if (user && (user.id === firebaseUser.uid || user.email?.toLowerCase() === firebaseUser.email.toLowerCase())) {
@@ -258,10 +267,10 @@ export default function App() {
               cardTheme: customTheme || check.user.cardTheme || 'obsidian-gold',
             };
             setUser(fullProfile);
-            localStorage.removeItem('sn_logout_explicit');
-            localStorage.setItem('sn_active_user', JSON.stringify(fullProfile));
-            localStorage.setItem('sn_last_active_user', JSON.stringify(fullProfile));
-            setLocalCache('sn_active_user', fullProfile);
+            if (typeof sessionStorage !== 'undefined') {
+              sessionStorage.setItem('sn_session_active', 'true');
+              sessionStorage.setItem('sn_session_user', JSON.stringify(fullProfile));
+            }
           }
         } catch {
           // ignore background auth check errors
@@ -495,13 +504,14 @@ export default function App() {
       localStorage.removeItem('sn_logout_explicit');
       localStorage.removeItem('sn_is_auto_locked');
       localStorage.removeItem('sn_locked_user');
-      localStorage.setItem('sn_active_user', JSON.stringify(finalUser));
-      localStorage.setItem('sn_last_active_user', JSON.stringify(finalUser));
-      localStorage.setItem('sn_user_profile', JSON.stringify(finalUser));
+      localStorage.removeItem('sn_active_user');
+      localStorage.removeItem('sn_last_active_user');
+      localStorage.removeItem('sn_user_profile');
       if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem('sn_active_user', JSON.stringify(finalUser));
+        sessionStorage.setItem('sn_session_active', 'true');
+        sessionStorage.setItem('sn_session_user', JSON.stringify(finalUser));
       }
-      setLocalCache('sn_active_user', finalUser);
+      setLocalCache('sn_active_user', null);
     } catch {
       // ignore
     }
@@ -517,6 +527,8 @@ export default function App() {
       localStorage.removeItem('sn_is_auto_locked');
       localStorage.removeItem('sn_locked_user');
       if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem('sn_session_active');
+        sessionStorage.removeItem('sn_session_user');
         sessionStorage.removeItem('sn_active_user');
       }
       setLocalCache('sn_active_user', null);

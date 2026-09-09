@@ -334,13 +334,18 @@ export async function saveUserProfile(userProfile: UserProfile): Promise<void> {
     savePersistedCardTheme(userProfile, userProfile.cardTheme);
   }
 
-  // 2. Always update local cache immediately for zero-latency persistence & offline support
+  // 2. Always update local cache immediately for zero-latency in-memory reactivity & offline support
   setLocalCache('user_profile', userProfile);
   try {
-    localStorage.setItem('sn_user_profile', JSON.stringify(userProfile));
-    localStorage.setItem('sn_active_user', JSON.stringify(userProfile));
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('sn_session_active') === 'true') {
+      sessionStorage.setItem('sn_session_user', JSON.stringify(userProfile));
+    }
+    // Prevent persistent auto-login in localStorage so exiting the page requires login every time
+    localStorage.removeItem('sn_user_profile');
+    localStorage.removeItem('sn_active_user');
+    localStorage.removeItem('sn_last_active_user');
   } catch (e) {
-    console.warn('LocalStorage write warning:', e);
+    console.warn('Session write warning:', e);
   }
 
   // 3. Update in-memory and persistent preset if user matches a role
