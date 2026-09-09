@@ -5,8 +5,9 @@ import { ASSETS } from '../../data/mockData';
 import { GoogleSheetsManager } from './GoogleSheetsManager';
 import { AssignmentRubric, exportFirestoreGradesToGoogleSheet, downloadGradesAsCSV } from '../../services/googleSheetsService';
 import { StudentWorkViewerModal, StudentWorkViewerData } from './StudentWorkViewerModal';
+import { BatchCsvGradingModal, BatchGradeRecord } from './BatchCsvGradingModal';
 
-interface StudentSubmission {
+export interface StudentSubmission {
   id: string;
   assignmentId?: string;
   studentName: string;
@@ -42,6 +43,7 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
   const [showSheetsImporter, setShowSheetsImporter] = useState<boolean>(false);
   const [activeRubric, setActiveRubric] = useState<AssignmentRubric | null>(null);
   const [fileViewerSubmission, setFileViewerSubmission] = useState<StudentWorkViewerData | null>(null);
+  const [showBatchCsvModal, setShowBatchCsvModal] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportMenuOpen, setExportMenuOpen] = useState<boolean>(false);
   const [exportSuccessModal, setExportSuccessModal] = useState<{
@@ -268,6 +270,96 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
     setSelectedSubmission(null);
   };
 
+  const handleApplyBatchGrades = async (
+    records: BatchGradeRecord[],
+    options: { pushNotifications: boolean; createNewEntries: boolean }
+  ) => {
+    if (records.length === 0) return;
+
+    // 1. Update local submissions list
+    setSubmissions((prev) => {
+      const updatedList = [...prev];
+
+      records.forEach((rec) => {
+        const existingIdx = updatedList.findIndex(
+          (s) =>
+            s.studentId.trim().toLowerCase() === rec.studentId.trim().toLowerCase() ||
+            (rec.matchedSubmissionId && s.id === rec.matchedSubmissionId) ||
+            (rec.studentName && (s.thaiName === rec.studentName || s.studentName === rec.studentName))
+        );
+
+        if (existingIdx >= 0) {
+          const current = updatedList[existingIdx];
+          updatedList[existingIdx] = {
+            ...current,
+            currentScore: rec.score,
+            feedback: rec.feedback || current.feedback,
+            status: 'graded',
+          };
+
+          if (current.assignmentId) {
+            updateAssignmentInFirestore(current.assignmentId, {
+              currentScore: rec.score,
+              status: 'submitted',
+            });
+
+            if (onGradeAssignment) {
+              onGradeAssignment(current.assignmentId, rec.score, rec.feedback || '');
+            }
+          }
+        } else if (options.createNewEntries) {
+          const dynamicStdAvatar = getPersistedAvatar(rec.studentId) || ASSETS.cardAvatar;
+          const newSub: StudentSubmission = {
+            id: `batch-sub-${Date.now()}-${rec.studentId}`,
+            studentName: rec.studentName,
+            thaiName: rec.studentName,
+            studentId: rec.studentId,
+            avatar: dynamicStdAvatar,
+            assignmentTitle: 'โครงงานโมเดล Deep Learning จำแนกภาพ CNN',
+            subject: 'ว33281 AI & Robotics (ม.6/1)',
+            submittedDate: 'นำเข้าจากระบบ (Batch CSV)',
+            fileAttachment: 'csv_batch_import.csv',
+            maxScore: rec.maxScore,
+            currentScore: rec.score,
+            status: 'graded',
+            feedback: rec.feedback || 'นำเข้าคะแนนผ่านระบบ Batch CSV อัตโนมัติ',
+          };
+          updatedList.unshift(newSub);
+        }
+      });
+
+      return updatedList;
+    });
+
+    // 2. Push realtime cross-role notifications if enabled
+    if (options.pushNotifications) {
+      try {
+        await pushRealtimeNotification({
+          title: `📊 อาจารย์บันทึกคะแนนเป็นกลุ่ม (${records.length} รายการ)`,
+          message: `อาจารย์ได้นำเข้าและอัปเดตคะแนนผลงานนักเรียนจำนวน ${records.length} คน ผ่านไฟล์ CSV เรียบร้อยแล้ว`,
+          type: 'grade',
+          priority: 'high',
+          role: 'student',
+          icon: 'table_chart',
+        });
+
+        await pushRealtimeNotification({
+          title: '📊 แจ้งเตือนการตัดเกรดและบันทึกคะแนนใหม่',
+          message: `มีการอัปเดตคะแนนเก็บรายวิชา ว33281 AI & Robotics สำหรับนักเรียนในชั้นเรียนแล้ว`,
+          type: 'grade',
+          priority: 'normal',
+          role: 'parent',
+          icon: 'school',
+        });
+      } catch (e) {
+        console.warn('Batch notification notice:', e);
+      }
+    }
+
+    setToastMessage(`นำเข้าและบันทึกคะแนนเป็นกลุ่มสำเร็จ ${records.length} คน เรียบร้อยแล้ว!`);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
   const pendingList = submissions.filter((s) => s.status === 'pending');
   const gradedList = submissions.filter((s) => s.status === 'graded');
 
@@ -405,6 +497,17 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
               </>
             )}
           </div>
+
+          {/* Batch CSV Grade Import Button */}
+          <button
+            type="button"
+            onClick={() => setShowBatchCsvModal(true)}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100 shadow-xs"
+            title="นำเข้าคะแนนนักเรียนทั้งห้องจากไฟล์ CSV หรือตาราง Excel ในคลิกเดียว"
+          >
+            <span className="material-symbols-outlined text-[18px] text-blue-700">upload_file</span>
+            <span>นำเข้าคะแนนเป็นกลุ่ม (Batch CSV)</span>
+          </button>
 
           <button
             onClick={() => setShowSheetsImporter((prev) => !prev)}
@@ -789,6 +892,17 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Batch CSV Grading Modal */}
+      <BatchCsvGradingModal
+        isOpen={showBatchCsvModal}
+        onClose={() => setShowBatchCsvModal(false)}
+        submissions={submissions}
+        defaultMaxScore={submissions[0]?.maxScore || 20}
+        assignmentTitle={submissions[0]?.assignmentTitle || 'โครงงานโมเดล Deep Learning จำแนกภาพ CNN'}
+        subjectTitle={submissions[0]?.subject || 'ว33281 AI & Robotics (ม.6/1)'}
+        onApplyBatchGrades={handleApplyBatchGrades}
+      />
     </div>
   );
 };
