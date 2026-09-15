@@ -2452,3 +2452,61 @@ export async function resetAllSystemDataAndFactoryDefaults(): Promise<{
     };
   }
 }
+
+// Student Submission Cloud Persistent Services
+export async function saveStudentSubmissionToFirestore(submission: {
+  id: string;
+  assignmentId: string;
+  assignmentTitle: string;
+  subjectCode: string;
+  studentId: string;
+  studentName: string;
+  studentAvatar?: string;
+  studentGradeRoom?: string;
+  status: 'submitted' | 'graded' | 'returned';
+  submissionText: string;
+  submittedAt: string;
+  files: { name: string; size: string; type: string; url?: string }[];
+  githubRepoUrl?: string;
+  score?: number;
+  maxScore: number;
+  feedback?: string;
+  gradedBy?: string;
+  gradedAt?: string;
+}): Promise<void> {
+  const path = `submissions/${submission.id}`;
+  try {
+    const docRef = doc(db, 'submissions', submission.id);
+    await setDoc(docRef, submission, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export function subscribeToSubmissions(
+  callback: (submissions: any[]) => void
+): () => void {
+  const path = 'submissions';
+  try {
+    const colRef = collection(db, 'submissions');
+    const unsubscribe = onSnapshot(
+      colRef,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items = snapshot.docs.map((d) => d.data());
+          callback(items);
+        } else {
+          callback([]);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+        callback([]);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return () => {};
+  }
+}

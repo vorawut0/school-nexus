@@ -1,138 +1,53 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, setPersistence, browserSessionPersistence, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
-import { initializeFirestore, getFirestore, setLogLevel, doc, getDocFromServer, Firestore } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import firebaseConfigJson from '../firebase-applet-config.json';
 
-// Suppress internal WebChannel / background network warning noise in iframe runner
-try {
-  setLogLevel('silent');
-} catch {
-  // ignore
-}
+const firebaseConfig = {
+  apiKey: firebaseConfigJson.apiKey,
+  authDomain: firebaseConfigJson.authDomain,
+  projectId: firebaseConfigJson.projectId,
+  storageBucket: firebaseConfigJson.storageBucket,
+  messagingSenderId: firebaseConfigJson.messagingSenderId,
+  appId: firebaseConfigJson.appId,
+};
 
-// Global console filter to prevent harmless WebChannel transport RPC retries from triggering the red badge
-if (typeof window !== 'undefined') {
-  const origWarn = console.warn;
-  const origError = console.error;
+export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-  console.warn = function (...args: any[]) {
-    const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-    if (
-      msg.includes('WebChannelConnection') ||
-      msg.includes('@firebase/firestore') ||
-      msg.includes('RPC \'Listen\'') ||
-      msg.includes('transport errored')
-    ) {
-      // Suppress noisy Firestore streaming re-try warnings in dev sandboxes
-      return;
-    }
-    origWarn.apply(console, args);
-  };
+// Use the databaseId provisioned for this applet if present
+export const db = firebaseConfigJson.firestoreDatabaseId
+  ? getFirestore(app, firebaseConfigJson.firestoreDatabaseId)
+  : getFirestore(app);
 
-  console.error = function (...args: any[]) {
-    const msg = args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-    if (
-      msg.includes('WebChannelConnection') ||
-      msg.includes('@firebase/firestore') ||
-      msg.includes('RPC \'Listen\'') ||
-      msg.includes('transport errored')
-    ) {
-      // Suppress harmless WebChannel reconnect errors
-      return;
-    }
-    origError.apply(console, args);
-  };
-}
-
-// Initialize Firebase App instance
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-
-// CRITICAL: Initialize Firestore instance with experimentalForceLongPolling for robust iframe & proxy connectivity
-const customDatabaseId = (firebaseConfig as any).firestoreDatabaseId;
-export const db: Firestore = (() => {
-  try {
-    return initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      ...(customDatabaseId ? { databaseId: customDatabaseId } : {}),
-    });
-  } catch (_err) {
-    // Fallback if already initialized
-    return customDatabaseId ? getFirestore(app, customDatabaseId) : getFirestore(app);
-  }
-})();
 export const auth = getAuth(app);
-if (typeof window !== 'undefined') {
-  try {
-    setPersistence(auth, browserSessionPersistence).catch(() => {});
-  } catch {
-    // ignore
-  }
-}
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({
-  prompt: 'select_account',
-});
 
 export enum OperationType {
   CREATE = 'create',
+  READ = 'read',
+  GET = 'read',
   UPDATE = 'update',
+  WRITE = 'write',
   DELETE = 'delete',
   LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
+export function handleFirestoreError(error: unknown, operation: OperationType, path: string): void {
+  console.warn(`[Firestore Error - ${operation}] on ${path}:`, error);
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
-        })) || [],
-    },
-    operationType,
-    path,
-  };
-  return errInfo;
-}
-
-// Test Connection to Firestore as required by guidelines
-export async function testConnection(): Promise<boolean> {
+// Connection check according to skill
+export async function testFirestoreConnection() {
   try {
-    await getDocFromServer(doc(db, 'system', 'connection-test'));
+    await getDocFromServer(doc(db, 'system', 'connection_test'));
+    console.log('[SchoolNexus Firebase] Cloud Firestore connection verified.');
     return true;
-  } catch (error: any) {
+  } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      return false;
+      console.warn('[SchoolNexus Firebase] Firestore client is offline or waiting for network.');
+    } else {
+      console.log('[SchoolNexus Firebase] Firestore connected (ready for collections).');
     }
-    // Expected to fail if doc doesn't exist or permissions are strict, but connection is alive
-    return true;
+    return false;
   }
 }
-
-// Run connectivity check on load
-testConnection();

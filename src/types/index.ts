@@ -427,3 +427,29 @@ export interface QuizUserAttempt {
   xpEarned: number;
 }
 
+export interface StudentSubmission {
+  id: string;
+  assignmentId: string;
+  assignmentTitle: string;
+  subjectCode: string;
+  studentId: string;
+  studentName: string;
+  studentAvatar?: string;
+  studentGradeRoom?: string;
+  status: 'submitted' | 'graded' | 'returned';
+  submissionText: string;
+  submittedAt: string;
+  files: {
+    name: string;
+    size: string;
+    type: string;
+    url?: string;
+  }[];
+  githubRepoUrl?: string;
+  score?: number;
+  maxScore: number;
+  feedback?: string;
+  gradedBy?: string;
+  gradedAt?: string;
+}
+

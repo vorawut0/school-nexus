@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, Assignment } from '../../types';
-import { pushRealtimeNotification, updateAssignmentInFirestore, getPersistedAvatar } from '../../services/firebaseService';
+import { pushRealtimeNotification, updateAssignmentInFirestore, getPersistedAvatar, subscribeToSubmissions, saveStudentSubmissionToFirestore } from '../../services/firebaseService';
 import { ASSETS } from '../../data/mockData';
 import { GoogleSheetsManager } from './GoogleSheetsManager';
 import { AssignmentRubric, exportFirestoreGradesToGoogleSheet, downloadGradesAsCSV } from '../../services/googleSheetsService';
@@ -164,8 +164,43 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
     },
   ]);
 
-  // Merge real student assignments into teacher submissions queue
+  // Merge real student assignments and Cloud Firestore submissions into teacher submissions queue
   useEffect(() => {
+    // 1. Subscribe to real-time Cloud Firestore submissions
+    const unsubCloudSubmissions = subscribeToSubmissions((cloudSubs) => {
+      if (cloudSubs && cloudSubs.length > 0) {
+        setSubmissions((prev) => {
+          const updated = [...prev];
+          cloudSubs.forEach((cs: any) => {
+            const existingIdx = updated.findIndex((s) => s.id === cs.id || s.assignmentId === cs.assignmentId);
+            const item: StudentSubmission = {
+              id: cs.id,
+              assignmentId: cs.assignmentId,
+              studentName: cs.studentName || 'Student',
+              thaiName: cs.studentName || 'นักเรียน',
+              studentId: cs.studentId || '66041001',
+              avatar: cs.studentAvatar || ASSETS.cardAvatar,
+              assignmentTitle: cs.assignmentTitle,
+              subject: cs.subjectCode || 'ว33281 AI & Robotics',
+              submittedDate: cs.submittedAt || 'เมื่อสักครู่',
+              fileAttachment: cs.files && cs.files.length > 0 ? cs.files[0].name : 'assignment_submission.pdf',
+              maxScore: cs.maxScore || 20,
+              currentScore: typeof cs.score === 'number' ? cs.score : undefined,
+              status: typeof cs.score === 'number' || cs.status === 'graded' ? 'graded' : 'pending',
+              feedback: cs.feedback || cs.submissionText,
+            };
+
+            if (existingIdx >= 0) {
+              updated[existingIdx] = { ...updated[existingIdx], ...item };
+            } else {
+              updated.unshift(item);
+            }
+          });
+          return updated;
+        });
+      }
+    });
+
     if (assignments && assignments.length > 0) {
       const studentSubmitted = assignments.filter((a) => a.status === 'submitted');
       if (studentSubmitted.length > 0) {
@@ -202,6 +237,10 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
         });
       }
     }
+
+    return () => {
+      unsubCloudSubmissions();
+    };
   }, [assignments]);
 
   const handleOpenGradeModal = (sub: StudentSubmission) => {
@@ -239,6 +278,32 @@ export const TeacherGradingView: React.FC<TeacherGradingViewProps> = ({
         status: 'submitted',
       });
     }
+
+    // Save graded state to Cloud Firestore submissions collection
+    saveStudentSubmissionToFirestore({
+      id: selectedSubmission.id,
+      assignmentId: selectedSubmission.assignmentId || selectedSubmission.id,
+      assignmentTitle: selectedSubmission.assignmentTitle,
+      subjectCode: selectedSubmission.subject,
+      studentId: selectedSubmission.studentId,
+      studentName: selectedSubmission.thaiName || selectedSubmission.studentName,
+      studentAvatar: selectedSubmission.avatar,
+      status: 'graded',
+      submissionText: selectedSubmission.feedback || '',
+      submittedAt: selectedSubmission.submittedDate,
+      files: [{ name: selectedSubmission.fileAttachment, size: '2.4 MB', type: 'application/octet-stream' }],
+      score: scoreNum,
+      maxScore: selectedSubmission.maxScore,
+      feedback: inputFeedback,
+      gradedBy: user.thaiName || user.name,
+      gradedAt: new Date().toLocaleDateString('th-TH', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }) + ' น.',
+    });
 
     if (onGradeAssignment && selectedSubmission.assignmentId) {
       onGradeAssignment(selectedSubmission.assignmentId, scoreNum, inputFeedback);

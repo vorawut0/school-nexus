@@ -65,6 +65,7 @@ import {
   deleteRoomBookingFromFirestore,
   addAssignmentToFirestore,
   updateAssignmentInFirestore,
+  saveStudentSubmissionToFirestore,
   addNotificationToFirestore,
   markAllNotificationsReadInFirestore,
   markNotificationReadInFirestore,
@@ -684,6 +685,36 @@ export default function App() {
       prev.map((as) => (as.id === assignmentId ? { ...as, ...submissionUpdate } : as))
     );
     updateAssignmentInFirestore(assignmentId, submissionUpdate);
+
+    // Save full Student Submission to Firestore submissions collection for Teacher Grading
+    const submissionId = `sub-${assignmentId}-${user?.id || 'std'}-${Date.now()}`;
+    saveStudentSubmissionToFirestore({
+      id: submissionId,
+      assignmentId,
+      assignmentTitle,
+      subjectCode: targetAssignment?.subjectCode || '',
+      studentId: user?.studentId || '66041001',
+      studentName: user?.thaiName || user?.name || 'วรวุฒิ เพ็ชรราย',
+      studentAvatar: user?.avatar,
+      studentGradeRoom: `${user?.grade || 'ม.6/1'} ${user?.room || ''}`.trim(),
+      status: 'submitted',
+      submissionText: notes,
+      submittedAt: new Date().toLocaleDateString('th-TH', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }) + ' น.',
+      files: (attachments || []).map((att) => ({
+        name: att.name,
+        size: att.size,
+        type: att.type,
+        url: att.url,
+      })),
+      githubRepoUrl: githubRepoUrl?.trim(),
+      maxScore: targetAssignment?.maxScore || 20,
+    });
 
     // Give user XP bonus for submitting work
     if (user) {
