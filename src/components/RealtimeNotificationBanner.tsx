@@ -44,21 +44,6 @@ export const RealtimeNotificationBanner: React.FC<RealtimeNotificationBannerProp
 
   if (!notification) return null;
 
-  const getRoleBadge = (role?: UserRole | 'all') => {
-    switch (role) {
-      case 'teacher':
-        return { label: 'อาจารย์', color: 'bg-blue-100 text-blue-800 border-blue-200' };
-      case 'admin':
-        return { label: 'ผู้ดูแลระบบ', color: 'bg-purple-100 text-purple-800 border-purple-200' };
-      case 'parent':
-        return { label: 'ผู้ปกครอง', color: 'bg-amber-100 text-amber-800 border-amber-200' };
-      case 'student':
-        return { label: 'นักเรียน', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
-      default:
-        return { label: 'ระบบรวม', color: 'bg-slate-100 text-slate-800 border-slate-200' };
-    }
-  };
-
   const getIcon = (type: NotificationItem['type'], customIcon?: string) => {
     if (customIcon) return customIcon;
     switch (type) {
@@ -81,84 +66,59 @@ export const RealtimeNotificationBanner: React.FC<RealtimeNotificationBannerProp
     }
   };
 
-  const badge = getRoleBadge(notification.role);
-
   return (
-    <div className="fixed top-4 right-3 sm:right-6 z-[100] max-w-md w-[calc(100vw-1.5rem)] sm:w-[440px] animate-slideInRightToast pointer-events-auto">
-      <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-700/90 overflow-hidden ring-1 ring-black/10 hover:shadow-3xl transition-all">
-        {/* Top bar with real-time beacon */}
-        <div className="bg-gradient-to-r from-slate-900 to-[#1550d3] px-3.5 py-1.5 flex items-center justify-between text-white text-[11px] font-semibold">
-          <div className="flex items-center gap-1.5">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="tracking-wide">การแจ้งเตือนสด (Live Realtime)</span>
-          </div>
-          <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${badge.color}`}>
-            {badge.label}
+    <div className="fixed top-3 right-3 sm:top-4 sm:right-4 z-[100] max-w-sm w-[calc(100vw-1.5rem)] sm:w-[330px] animate-slideInRightToast pointer-events-auto">
+      <div
+        onClick={() => {
+          if (onMarkAsRead) onMarkAsRead(notification.id);
+          onOpenDrawer();
+          onClose();
+        }}
+        className="group relative bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-xl shadow-lg hover:shadow-xl border border-slate-200/90 dark:border-slate-800 overflow-hidden transition-all cursor-pointer p-2 sm:p-2.5 flex items-center gap-2.5 ring-1 ring-black/5"
+      >
+        {/* Compact Icon */}
+        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-[#1550d3]/10 to-[#7857f8]/10 border border-[#1550d3]/20 flex items-center justify-center shrink-0 text-[#1550d3] dark:text-blue-400">
+          <span className="material-symbols-outlined text-[17px] sm:text-[19px]">
+            {getIcon(notification.type, notification.icon)}
           </span>
         </div>
 
-        {/* Body content */}
-        <div className="p-4 flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#1550d3]/10 to-[#7857f8]/10 border border-[#1550d3]/20 flex items-center justify-center shrink-0 text-[#1550d3] shadow-xs">
-            <span className="material-symbols-outlined text-[22px]">
-              {getIcon(notification.type, notification.icon)}
+        {/* Text Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 leading-none">
+            <span className="relative flex h-1.5 w-1.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+            </span>
+            <h4 className="text-[11.5px] sm:text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+              {notification.title}
+            </h4>
+            <span className="text-[9px] text-slate-400 dark:text-slate-500 shrink-0 ml-auto font-mono">
+              {formatRealtimeNotificationTime(notification.timestamp, notification.time)}
             </span>
           </div>
+          <p className="text-[10.5px] sm:text-[11px] text-slate-600 dark:text-slate-300 truncate mt-1">
+            {notification.message}
+          </p>
+        </div>
 
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-1">
-              <h4 className="text-[13px] font-bold text-slate-900 truncate">
-                {notification.title}
-              </h4>
-              <span className="text-[10px] text-[#1550d3] font-bold shrink-0 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/60">
-                {formatRealtimeNotificationTime(notification.timestamp, notification.time)}
-              </span>
-            </div>
-            <p className="text-[12px] text-slate-600 mt-1 leading-snug line-clamp-2">
-              {notification.message}
-            </p>
-
-            {/* Actions */}
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                onClick={() => {
-                  if (onMarkAsRead) onMarkAsRead(notification.id);
-                  onOpenDrawer();
-                  onClose();
-                }}
-                className="px-2.5 py-1 rounded-lg bg-[#1550d3] hover:bg-[#1242b0] text-white text-[11px] font-bold transition-all active:scale-95 shadow-xs cursor-pointer flex items-center gap-1"
-              >
-                <span>เปิดดูการแจ้งเตือน</span>
-                <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  if (onMarkAsRead) onMarkAsRead(notification.id);
-                  onClose();
-                }}
-                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold transition-all active:scale-95 cursor-pointer"
-              >
-                รับทราบ
-              </button>
-            </div>
-          </div>
-
-          {/* Dismiss button */}
+        {/* Inline Actions */}
+        <div className="flex items-center gap-0.5 shrink-0">
           <button
-            onClick={onClose}
-            className="w-6 h-6 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="w-5 h-5 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-colors cursor-pointer text-xs"
             aria-label="Dismiss notification"
           >
             ✕
           </button>
         </div>
 
-        {/* Progress bar countdown */}
-        <div className="h-1 w-full bg-slate-100">
+        {/* Slim countdown bar */}
+        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-slate-100 dark:bg-slate-800">
           <div
             className="h-full bg-gradient-to-r from-[#1550d3] to-emerald-500 transition-all duration-75"
             style={{ width: `${progress}%` }}

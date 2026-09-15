@@ -935,14 +935,14 @@ export default function App() {
 
       {/* Offline Toast Notification */}
       {offlineToast && (
-        <div className="fixed top-4 right-3 sm:right-6 z-[95] bg-[#121b2e] text-white px-4 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-3 text-xs font-semibold animate-slideInRightToast max-w-[calc(100vw-24px)] sm:max-w-md pointer-events-auto">
-          <span className="material-symbols-outlined text-[#20C997] text-[20px] shrink-0">
+        <div className="fixed top-3 right-3 sm:top-4 sm:right-4 z-[95] bg-[#121b2e]/95 backdrop-blur-md text-white px-3 py-2 rounded-xl shadow-lg border border-slate-700/80 flex items-center gap-2 text-xs font-medium animate-slideInRightToast max-w-[calc(100vw-24px)] sm:max-w-xs pointer-events-auto">
+          <span className="material-symbols-outlined text-[#20C997] text-[18px] shrink-0">
             {isOffline ? 'cloud_off' : 'sync'}
           </span>
-          <span className="flex-1 truncate">{offlineToast}</span>
+          <span className="flex-1 truncate text-[11px]">{offlineToast}</span>
           <button
             onClick={() => setOfflineToast(null)}
-            className="text-slate-400 hover:text-white cursor-pointer shrink-0 p-1"
+            className="text-slate-400 hover:text-white cursor-pointer shrink-0 p-0.5 text-xs"
           >
             ✕
           </button>
