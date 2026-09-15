@@ -28,6 +28,7 @@ npm run build
 # 3. Deploy built 'dist' folder to 'gh-pages' branch
 echo "🌐 Deploying to 'gh-pages' branch for GitHub Pages hosting..."
 cd dist
+cp index.html 404.html
 rm -rf .git
 git init -b gh-pages
 git config user.name "vorawut0"
