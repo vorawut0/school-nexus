@@ -10,6 +10,7 @@ import {
   ContactlessWaveSvg,
 } from './common/SmartIdCardGraphics';
 import { getPersistedCardTheme } from '../services/firebaseService';
+import { exportTranscriptAsPdf, getDefaultTranscriptData } from '../utils/pdfGenerator';
 
 interface ProfileViewProps {
   user: UserProfile;
@@ -21,6 +22,7 @@ interface ProfileViewProps {
   onSignOut: () => void;
   onOpenQrScanner: () => void;
   onOpenGpaModal: () => void;
+  onOpenOfficialTranscript?: () => void;
   onOpenShareId?: () => void;
   onOpenIdCardModal?: () => void;
   onOpenChangePhoto?: () => void;
@@ -37,6 +39,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onSignOut,
   onOpenQrScanner,
   onOpenGpaModal,
+  onOpenOfficialTranscript,
   onOpenShareId,
   onOpenIdCardModal,
   onOpenChangePhoto,
@@ -476,6 +479,50 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <div className="text-[13px] font-semibold text-[#121b2e] truncate">
                   {user.advisor || 'ดร. สมนึก เจริญศิลป์'}
                 </div>
+              </div>
+            </div>
+
+            {/* Quick Transcript & Grade Report PDF Download Actions */}
+            <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-200/80 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                  <span className="material-symbols-outlined text-[19px]">picture_as_pdf</span>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                    <span>ระเบียนแสดงผลการเรียน (ใบ ปพ.1 : พ)</span>
+                    <span className="text-[9.5px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.2 rounded">PDF</span>
+                  </div>
+                  <div className="text-[11px] text-slate-600">
+                    ดาวน์โหลดใบ ปพ.1 ฉบับทางการ หรือเปิดดูรายงานผลการเรียนทั้งหมด
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const data = getDefaultTranscriptData(user);
+                    exportTranscriptAsPdf(data);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-transform active:scale-95 cursor-pointer"
+                  title="ดาวน์โหลดใบ ปพ.1 เป็นไฟล์ PDF ทันที"
+                >
+                  <span className="material-symbols-outlined text-[16px]">download</span>
+                  <span>โหลด PDF ปพ.1</span>
+                </button>
+                {onOpenOfficialTranscript && (
+                  <button
+                    type="button"
+                    onClick={onOpenOfficialTranscript}
+                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 font-semibold text-xs border border-slate-300 flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                    title="เปิดดูเอกสาร ปพ.1"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">visibility</span>
+                    <span>ดูเอกสาร</span>
+                  </button>
+                )}
               </div>
             </div>
           </section>

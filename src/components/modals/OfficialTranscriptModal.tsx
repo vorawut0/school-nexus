@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { UserProfile } from '../../types';
+import { exportTranscriptAsPdf, getDefaultTranscriptData } from '../../utils/pdfGenerator';
 
 interface OfficialTranscriptModalProps {
   isOpen: boolean;
@@ -15,6 +16,11 @@ export const OfficialTranscriptModal: React.FC<OfficialTranscriptModalProps> = (
   const printRef = useRef<HTMLDivElement>(null);
 
   if (!isOpen) return null;
+
+  const handleExportPdf = () => {
+    const transcriptData = getDefaultTranscriptData(user);
+    exportTranscriptAsPdf(transcriptData);
+  };
 
   const handlePrint = () => {
     window.print();
@@ -117,11 +123,21 @@ export const OfficialTranscriptModal: React.FC<OfficialTranscriptModalProps> = (
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handlePrint}
+              onClick={handleExportPdf}
               className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-2 shadow-md cursor-pointer transition-transform active:scale-95"
+              title="ดาวน์โหลดหรือบันทึกเป็นเอกสารไฟล์ PDF ทางการ"
+            >
+              <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+              <span>ดาวน์โหลด PDF (ปพ.1)</span>
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-1.5 border border-slate-700 cursor-pointer transition-transform active:scale-95"
+              title="พิมพ์เอกสารออกเครื่องพิมพ์"
             >
               <span className="material-symbols-outlined text-[18px]">print</span>
-              <span>พิมพ์ / บันทึก PDF</span>
+              <span className="hidden sm:inline">พิมพ์</span>
             </button>
             <button
               type="button"

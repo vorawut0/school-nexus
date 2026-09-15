@@ -20,6 +20,7 @@ import {
   Cell,
 } from 'recharts';
 import { UserProfile } from '../../types';
+import { exportTranscriptAsPdf, getDefaultTranscriptData } from '../../utils/pdfGenerator';
 
 export interface SemesterGpaRecord {
   semester: string;
@@ -276,15 +277,32 @@ export const GpaAnalyticsChart: React.FC<GpaAnalyticsChartProps> = ({
             </div>
           </div>
 
-          {onOpenDetailedModal && (
+          <div className="flex items-center gap-2 shrink-0 ml-2">
             <button
-              onClick={onOpenDetailedModal}
-              className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-0.5 cursor-pointer shrink-0 ml-2"
+              type="button"
+              onClick={() => {
+                const data = getDefaultTranscriptData(user);
+                exportTranscriptAsPdf(data);
+              }}
+              className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1 border border-emerald-200 cursor-pointer transition-colors"
+              title="ดาวน์โหลดใบ ปพ.1 / ใบเกรดสะสมเป็นไฟล์ PDF"
             >
-              <span>รายงานฉบับเต็ม</span>
-              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+              <span className="material-symbols-outlined text-[15px] text-emerald-600">picture_as_pdf</span>
+              <span className="hidden sm:inline">โหลด PDF ปพ.1</span>
+              <span className="sm:hidden">PDF</span>
             </button>
-          )}
+
+            {onOpenDetailedModal && (
+              <button
+                type="button"
+                onClick={onOpenDetailedModal}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-0.5 cursor-pointer"
+              >
+                <span>รายงานฉบับเต็ม</span>
+                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Quick Stat Pill Row */}

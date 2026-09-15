@@ -1,18 +1,30 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../../types';
 import { GpaAnalyticsChart } from '../analytics/GpaAnalyticsChart';
+import { exportTranscriptAsPdf, getDefaultTranscriptData } from '../../utils/pdfGenerator';
 
 interface GpaModalProps {
   user: UserProfile;
   isOpen: boolean;
   onClose: () => void;
+  onOpenOfficialTranscript?: () => void;
 }
 
-export const GpaModal: React.FC<GpaModalProps> = ({ user, isOpen, onClose }) => {
+export const GpaModal: React.FC<GpaModalProps> = ({
+  user,
+  isOpen,
+  onClose,
+  onOpenOfficialTranscript,
+}) => {
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'stem' | 'language' | 'arts'>('all');
   const [copiedNotification, setCopiedNotification] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleDownloadPdfTranscript = () => {
+    const data = getDefaultTranscriptData(user);
+    exportTranscriptAsPdf(data);
+  };
 
   const grades = [
     { code: 'CS30201', name: 'วิทยาการคำนวณ & AI ประยุกต์', credit: 1.5, grade: '4.0', score: 96, category: 'stem', teacher: 'ดร.สมชาย วิศวกรรม' },
@@ -70,6 +82,28 @@ export const GpaModal: React.FC<GpaModalProps> = ({ user, isOpen, onClose }) => 
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={handleDownloadPdfTranscript}
+              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              title="ดาวน์โหลดใบ ปพ.1 / ใบเกรดทางการเป็นไฟล์ PDF"
+            >
+              <span className="material-symbols-outlined text-[17px]">picture_as_pdf</span>
+              <span>โหลด PDF ปพ.1</span>
+            </button>
+
+            {onOpenOfficialTranscript && (
+              <button
+                type="button"
+                onClick={onOpenOfficialTranscript}
+                className="hidden md:flex px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-semibold items-center gap-1.5 border border-blue-200 transition-colors cursor-pointer"
+                title="เปิดดูแบบฟอร์ม ปพ.1 ฉบับทางการ"
+              >
+                <span className="material-symbols-outlined text-[17px] text-blue-600">article</span>
+                <span>ดูแบบฟอร์ม ปพ.1</span>
+              </button>
+            )}
+
+            <button
+              type="button"
               onClick={handleCopySummary}
               className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
               title="คัดลอกสรุปผลการเรียน"
@@ -85,7 +119,7 @@ export const GpaModal: React.FC<GpaModalProps> = ({ user, isOpen, onClose }) => 
               title="พิมพ์รายงานผลการเรียน"
             >
               <span className="material-symbols-outlined text-[18px]">print</span>
-              <span className="hidden sm:inline">พิมพ์ / PDF</span>
+              <span className="hidden sm:inline">พิมพ์</span>
             </button>
 
             <button
@@ -154,6 +188,44 @@ export const GpaModal: React.FC<GpaModalProps> = ({ user, isOpen, onClose }) => 
               <div className="text-[11px] text-slate-500 mt-2 bg-amber-50 border border-amber-200/60 p-2 rounded-xl text-amber-900">
                 มีสิทธิ์รับทุนการศึกษาความเป็นเลิศทางวิชาการและโควตาเข้าศึกษาต่อระดับอุดมศึกษา
               </div>
+            </div>
+          </div>
+
+          {/* Download Official Transcript (ปพ.1) Banner */}
+          <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <span className="material-symbols-outlined text-[22px]">description</span>
+              </div>
+              <div>
+                <h5 className="font-bold text-sm text-emerald-950 flex items-center gap-1.5">
+                  <span>ระเบียนแสดงผลการเรียน ปพ.1 : พ (Official Academic Transcript)</span>
+                  <span className="text-[10px] bg-emerald-200/80 text-emerald-900 font-bold px-1.5 py-0.5 rounded">PDF</span>
+                </h5>
+                <p className="text-xs text-emerald-800/90 mt-0.5">
+                  เอกสารทางการพร้อมตราประทับดิจิทัลและ QR ยืนยันความถูกต้อง ดาวน์โหลดหรือพิมพ์เป็นไฟล์ PDF ได้ทันที
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+              <button
+                type="button"
+                onClick={handleDownloadPdfTranscript}
+                className="flex-1 sm:flex-none px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-transform active:scale-95 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[17px]">download</span>
+                <span>โหลดไฟล์ PDF ปพ.1</span>
+              </button>
+              {onOpenOfficialTranscript && (
+                <button
+                  type="button"
+                  onClick={onOpenOfficialTranscript}
+                  className="flex-1 sm:flex-none px-3 py-2 rounded-xl bg-white hover:bg-emerald-100/50 text-emerald-900 font-semibold text-xs border border-emerald-300 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[17px]">visibility</span>
+                  <span>เปิดดูตัวอย่าง</span>
+                </button>
+              )}
             </div>
           </div>
 

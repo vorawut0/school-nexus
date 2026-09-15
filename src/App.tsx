@@ -45,6 +45,7 @@ import { ShareIdQrModal } from './components/modals/ShareIdQrModal';
 import { CampusPulseModal, CampusPulseTab } from './components/modals/CampusPulseModal';
 import { ChangeIdPhotoModal } from './components/modals/ChangeIdPhotoModal';
 import { EditProfileModal } from './components/modals/EditProfileModal';
+import { OfficialTranscriptModal } from './components/modals/OfficialTranscriptModal';
 import { RealtimeNotificationBanner } from './components/RealtimeNotificationBanner';
 import { checkLinkedGithubRepoCommits } from './utils/githubSync';
 import { playNotificationChime } from './utils/sound';
@@ -471,6 +472,7 @@ export default function App() {
   const [showCampusMapModal, setShowCampusMapModal] = useState<boolean>(false);
   const [showScheduleModal, setShowScheduleModal] = useState<boolean>(false);
   const [showGpaModal, setShowGpaModal] = useState<boolean>(false);
+  const [showOfficialTranscriptModal, setShowOfficialTranscriptModal] = useState<boolean>(false);
   const [showCalendarModal, setShowCalendarModal] = useState<boolean>(false);
   const [showSearchModal, setShowSearchModal] = useState<boolean>(false);
   const [showNotificationDrawer, setShowNotificationDrawer] = useState<boolean>(false);
@@ -1130,6 +1132,7 @@ export default function App() {
             onSignOut={handleSignOut}
             onOpenQrScanner={() => setShowQrScannerModal(true)}
             onOpenGpaModal={() => setShowGpaModal(true)}
+            onOpenOfficialTranscript={() => setShowOfficialTranscriptModal(true)}
             onOpenShareId={() => setShowShareIdModal(true)}
             onOpenIdCardModal={() => setShowDigitalIdModal(true)}
             onOpenChangePhoto={() => setShowChangePhotoModal(true)}
@@ -1257,6 +1260,13 @@ export default function App() {
         user={user}
         isOpen={showGpaModal}
         onClose={() => setShowGpaModal(false)}
+        onOpenOfficialTranscript={() => setShowOfficialTranscriptModal(true)}
+      />
+
+      <OfficialTranscriptModal
+        isOpen={showOfficialTranscriptModal}
+        onClose={() => setShowOfficialTranscriptModal(false)}
+        user={user}
       />
 
       <CalendarModal
