@@ -3,6 +3,10 @@
 set -e
 
 REMOTE_URL=$(git config --get remote.origin.url)
+if [ -z "$REMOTE_URL" ]; then
+  echo "❌ Error: remote.origin.url not configured in git"
+  exit 1
+fi
 
 echo "🚀 Syncing changes to GitHub repository (vorawut0/school-nexus)..."
 
