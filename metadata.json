@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Remix Remix School Nexus - Smart Campus \u0026 Learning Hub",
+  "description": "Smart school management, digital campus, interactive learning hub, task tracker, and AI assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

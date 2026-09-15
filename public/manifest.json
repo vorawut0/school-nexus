@@ -1,0 +1,77 @@
+{
+  "name": "School Nexus - Smart Campus & Learning Hub",
+  "short_name": "School Nexus",
+  "description": "ระบบบัตรนักเรียนดิจิทัลและศูนย์การเรียนรู้อัจฉริยะสำหรับโรงเรียนยุคใหม่",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay", "minimal-ui"],
+  "background_color": "#0c1527",
+  "theme_color": "#0c1527",
+  "orientation": "portrait",
+  "lang": "th-TH",
+  "dir": "ltr",
+  "categories": ["education", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "สแกน QR Code",
+      "short_name": "สแกน QR",
+      "description": "เปิดกล้องสแกนคิวอาร์โค้ดบัตรหรือจุดเช็คชื่อ",
+      "url": "/?action=scan",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "บัตรนักเรียน Digital ID",
+      "short_name": "บัตรนักเรียน",
+      "description": "เปิดบัตรประจำตัวนักเรียนดิจิทัลและ QR ประจำตัว",
+      "url": "/?tab=profile",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "ตารางเรียนวันนี้",
+      "short_name": "ตารางเรียน",
+      "description": "ดูตารางเรียนและคาบเรียนประจำวัน",
+      "url": "/?tab=courses",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "AI ติวเตอร์อัจฉริยะ",
+      "short_name": "AI ติวเตอร์",
+      "description": "ถามตอบและสรุปบทเรียนด้วย AI",
+      "url": "/?action=tutor",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}
