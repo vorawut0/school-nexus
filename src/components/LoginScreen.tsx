@@ -11,6 +11,7 @@ import {
   StoredAccountRecord,
   getDomainHelpMessage,
   DomainHelpMessage,
+  syncAccountsFromCloud,
 } from '../services/firebaseService';
 import { validateRealEmail } from '../utils/validation';
 
@@ -111,6 +112,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     refreshStoredAccounts();
   }, [authMode, selectedRole]);
 
+  // Automatically sync accounts from Firebase Cloud on initial mount so cross-device accounts are available immediately
+  useEffect(() => {
+    syncAccountsFromCloud()
+      .then((res) => {
+        if (res.success && res.count > 0) {
+          refreshStoredAccounts();
+        }
+      })
+      .catch((e) => console.debug('Initial cloud accounts sync notice:', e));
+  }, []);
+
   const handleQuickLogin = async (acc: StoredAccountRecord) => {
     setSelectedRole(acc.role);
     setIdentifier(acc.studentId || acc.email);
@@ -171,13 +183,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       setIsLoading(false);
 
       if (result.success && result.user) {
+        const resolvedRole = result.user.role || selectedRole;
         try {
-          localStorage.setItem('sn_last_role', selectedRole);
+          localStorage.setItem('sn_last_role', resolvedRole);
           if (rememberMe) {
-            localStorage.setItem(`sn_remembered_id_${selectedRole}`, identifier.trim());
+            localStorage.setItem(`sn_remembered_id_${resolvedRole}`, identifier.trim());
             localStorage.setItem('sn_remember_me', 'true');
           } else {
-            localStorage.removeItem(`sn_remembered_id_${selectedRole}`);
+            localStorage.removeItem(`sn_remembered_id_${resolvedRole}`);
             localStorage.setItem('sn_remember_me', 'false');
           }
         } catch {

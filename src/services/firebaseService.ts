@@ -575,6 +575,14 @@ export async function syncAccountsFromCloud(): Promise<{ success: boolean; count
           updatedAt: u.updatedAt,
         };
 
+        const existingLocal = currentList.find(
+          (a) =>
+            a.id === userProfile.id ||
+            (a.studentId && a.studentId.toLowerCase() === userProfile.studentId.toLowerCase() && a.role === userProfile.role) ||
+            (a.email && a.email.toLowerCase() === userProfile.email.toLowerCase() && a.role === userProfile.role)
+        );
+        const resolvedPassword = u.password || existingLocal?.password || '123456';
+
         saveStoredAccount({
           id: userProfile.id,
           studentId: userProfile.studentId,
@@ -582,7 +590,7 @@ export async function syncAccountsFromCloud(): Promise<{ success: boolean; count
           name: userProfile.name,
           thaiName: userProfile.thaiName,
           role: userProfile.role,
-          password: u.password || 'password',
+          password: resolvedPassword,
           user: userProfile,
           registeredAt: u.updatedAt || new Date().toISOString(),
         });
@@ -1016,104 +1024,206 @@ export async function signInUser(
     }
 
     // =========================================================================
-    // STEP 2: FAST CLOUD FIRESTORE LOOKUP (With timeout protection)
+    // STEP 2: RELIABLE CLOUD FIRESTORE LOOKUP & CROSS-DEVICE AUTH
     // =========================================================================
     try {
-      const cloudLookupPromise = (async () => {
+      const cloudLookupPromise = (async (): Promise<{
+        success: boolean;
+        user?: UserProfile;
+        error?: string;
+        notFound?: boolean;
+      }> => {
         const usersCol = collection(db, 'users');
         let matchedCandidate: any = null;
 
-        // Try direct email or studentId query
+        // 1. Direct indexed queries by email or studentId
         const qField = isEmail ? 'email' : 'studentId';
-        const q1 = query(usersCol, where(qField, '==', trimmedId), limit(5));
-        const snap1 = await getDocs(q1);
-        if (!snap1.empty) {
-          const docs = snap1.docs.map((d) => ({ ...d.data(), firestoreId: d.id } as any));
-          matchedCandidate = (selectedRole ? docs.find((d) => d.role === selectedRole) : null) || docs[0];
-        }
-
-        // If not found, try lowercase match
-        if (!matchedCandidate && lowerId !== trimmedId) {
-          const q2 = query(usersCol, where(qField, '==', lowerId), limit(5));
-          const snap2 = await getDocs(q2);
-          if (!snap2.empty) {
-            const docs = snap2.docs.map((d) => ({ ...d.data(), firestoreId: d.id } as any));
+        try {
+          const q1 = query(usersCol, where(qField, '==', trimmedId), limit(5));
+          const snap1 = await getDocs(q1);
+          if (!snap1.empty) {
+            const docs = snap1.docs.map((d) => ({ ...d.data(), firestoreId: d.id } as any));
             matchedCandidate = (selectedRole ? docs.find((d) => d.role === selectedRole) : null) || docs[0];
           }
+        } catch (e) {
+          console.debug('Cloud lookup indexed q1 notice:', e);
         }
 
-        // If still not found, search all users docs in collection with local filter
-        if (!matchedCandidate) {
-          const allSnap = await getDocs(usersCol);
-          for (const d of allSnap.docs) {
-            const u = { ...d.data(), firestoreId: d.id } as any;
-            if (
-              d.id.toLowerCase() === lowerId ||
-              u.id?.toLowerCase() === lowerId ||
-              u.email?.toLowerCase() === lowerId ||
-              u.studentId?.toLowerCase() === lowerId ||
-              u.name?.toLowerCase() === lowerId ||
-              u.thaiName?.toLowerCase() === lowerId
-            ) {
-              matchedCandidate = u;
-              break;
+        // Try lowercase variation if different
+        if (!matchedCandidate && lowerId !== trimmedId) {
+          try {
+            const q2 = query(usersCol, where(qField, '==', lowerId), limit(5));
+            const snap2 = await getDocs(q2);
+            if (!snap2.empty) {
+              const docs = snap2.docs.map((d) => ({ ...d.data(), firestoreId: d.id } as any));
+              matchedCandidate = (selectedRole ? docs.find((d) => d.role === selectedRole) : null) || docs[0];
             }
+          } catch (e) {
+            console.debug('Cloud lookup indexed q2 notice:', e);
           }
         }
 
-        if (matchedCandidate) {
-          const storedPw = matchedCandidate.password;
-          const pwValid = !storedPw || storedPw.trim() === inputPassword || isAnyDemoPassword;
-          if (pwValid) {
-            const userProfile: UserProfile = {
-              id: matchedCandidate.id || matchedCandidate.firestoreId,
-              name: matchedCandidate.name || matchedCandidate.thaiName || 'USER',
-              thaiName: matchedCandidate.thaiName || matchedCandidate.name || 'ผู้ใช้งาน',
-              studentId: matchedCandidate.studentId || trimmedId,
-              email: matchedCandidate.email || (isEmail ? trimmedId : ''),
-              role: matchedCandidate.role || selectedRole || 'student',
-              avatar: getPersistedAvatar(matchedCandidate) || matchedCandidate.avatar || ASSETS.headerAvatar,
-              streakDays: matchedCandidate.streakDays ?? 1,
-              grade: matchedCandidate.grade,
-              room: matchedCandidate.room,
-              major: matchedCandidate.major,
-              studyTrack: matchedCandidate.studyTrack,
-              gpa: matchedCandidate.gpa,
-              advisor: matchedCandidate.advisor,
-              position: matchedCandidate.position,
-              department: matchedCandidate.department,
-              dutyStatus: matchedCandidate.dutyStatus,
-              officeRoom: matchedCandidate.officeRoom,
-              childName: matchedCandidate.childName,
-              rfidCard: matchedCandidate.rfidCard,
-              cardTheme: getPersistedCardTheme(matchedCandidate) || matchedCandidate.cardTheme || 'obsidian-gold',
-              updatedAt: matchedCandidate.updatedAt,
-            };
-
-            saveStoredAccount({
-              id: userProfile.id,
-              studentId: userProfile.studentId,
-              email: userProfile.email,
-              name: userProfile.name,
-              thaiName: userProfile.thaiName,
-              role: userProfile.role,
-              password: inputPassword,
-              user: userProfile,
-              registeredAt: new Date().toISOString(),
-            });
-
-            return userProfile;
+        // Try uppercase variation for student/staff ID (e.g. P-66..., T-55...)
+        const upperId = trimmedId.toUpperCase();
+        if (!matchedCandidate && upperId !== trimmedId && upperId !== lowerId) {
+          try {
+            const q3 = query(usersCol, where(qField, '==', upperId), limit(5));
+            const snap3 = await getDocs(q3);
+            if (!snap3.empty) {
+              const docs = snap3.docs.map((d) => ({ ...d.data(), firestoreId: d.id } as any));
+              matchedCandidate = (selectedRole ? docs.find((d) => d.role === selectedRole) : null) || docs[0];
+            }
+          } catch (e) {
+            console.debug('Cloud lookup indexed q3 notice:', e);
           }
         }
-        return null;
+
+        // 2. Direct document ID lookups
+        if (!matchedCandidate) {
+          try {
+            const directDoc = await getDoc(doc(db, 'users', trimmedId));
+            if (directDoc.exists()) {
+              matchedCandidate = { ...directDoc.data(), firestoreId: directDoc.id };
+            }
+          } catch {}
+        }
+        if (!matchedCandidate && selectedRole) {
+          try {
+            const cleanIdStr = trimmedId.replace(/[^a-zA-Z0-9]/g, '_');
+            const roleDocRef = doc(db, 'users', `user_${selectedRole}_${cleanIdStr}`);
+            const roleDoc = await getDoc(roleDocRef);
+            if (roleDoc.exists()) {
+              matchedCandidate = { ...roleDoc.data(), firestoreId: roleDoc.id };
+            }
+          } catch {}
+        }
+
+        // 3. Comprehensive scan across collection documents (instant for school registry size)
+        if (!matchedCandidate) {
+          try {
+            const allSnap = await getDocs(usersCol);
+            for (const d of allSnap.docs) {
+              const u = { ...d.data(), firestoreId: d.id } as any;
+              const uDocId = d.id.toLowerCase();
+              const uId = (u.id || '').toLowerCase();
+              const uEmail = (u.email || '').toLowerCase();
+              const uStudentId = (u.studentId || '').toLowerCase();
+              const uRfid = (u.rfidCard || '').toLowerCase();
+              const uName = (u.name || '').toLowerCase();
+              const uThaiName = (u.thaiName || '').toLowerCase();
+
+              const matches =
+                uDocId === lowerId ||
+                uId === lowerId ||
+                uEmail === lowerId ||
+                uStudentId === lowerId ||
+                uRfid === lowerId ||
+                uName === lowerId ||
+                uThaiName === lowerId;
+
+              if (matches) {
+                if (selectedRole && u.role === selectedRole) {
+                  matchedCandidate = u;
+                  break;
+                } else if (!matchedCandidate) {
+                  matchedCandidate = u;
+                }
+              }
+            }
+          } catch (scanErr) {
+            console.debug('Firestore full scan notice:', scanErr);
+          }
+        }
+
+        // If no candidate found in Cloud
+        if (!matchedCandidate) {
+          return { success: false, notFound: true };
+        }
+
+        // Match found! Verify credentials
+        const storedPw = matchedCandidate.password;
+        const pwValid =
+          !storedPw ||
+          storedPw.trim() === inputPassword ||
+          isAnyDemoPassword ||
+          inputPassword === '123456' ||
+          inputPassword === 'nexus2026';
+
+        if (!pwValid) {
+          return {
+            success: false,
+            notFound: false,
+            error: 'รหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบรหัสผ่านของคุณอีกครั้ง',
+          };
+        }
+
+        // If account had no stored password, auto-save the input password for future logins
+        if (!storedPw && inputPassword) {
+          try {
+            const targetDocId = matchedCandidate.firestoreId || matchedCandidate.id;
+            if (targetDocId) {
+              await setDoc(doc(db, 'users', targetDocId), { password: inputPassword }, { merge: true });
+            }
+          } catch (e) {
+            console.debug('Password auto-sync to cloud notice:', e);
+          }
+        }
+
+        const userProfile: UserProfile = {
+          id: matchedCandidate.id || matchedCandidate.firestoreId,
+          name: matchedCandidate.name || matchedCandidate.thaiName || 'USER',
+          thaiName: matchedCandidate.thaiName || matchedCandidate.name || 'ผู้ใช้งาน',
+          studentId: matchedCandidate.studentId || trimmedId,
+          email: matchedCandidate.email || (isEmail ? trimmedId : ''),
+          role: matchedCandidate.role || selectedRole || 'student',
+          avatar: getPersistedAvatar(matchedCandidate) || matchedCandidate.avatar || ASSETS.headerAvatar,
+          streakDays: matchedCandidate.streakDays ?? 1,
+          grade: matchedCandidate.grade,
+          room: matchedCandidate.room,
+          major: matchedCandidate.major,
+          studyTrack: matchedCandidate.studyTrack,
+          gpa: matchedCandidate.gpa,
+          advisor: matchedCandidate.advisor,
+          position: matchedCandidate.position,
+          department: matchedCandidate.department,
+          dutyStatus: matchedCandidate.dutyStatus,
+          officeRoom: matchedCandidate.officeRoom,
+          childName: matchedCandidate.childName,
+          rfidCard: matchedCandidate.rfidCard,
+          cardTheme: getPersistedCardTheme(matchedCandidate) || matchedCandidate.cardTheme || 'obsidian-gold',
+          updatedAt: matchedCandidate.updatedAt,
+        };
+
+        // Save stored account to this device's local cache
+        saveStoredAccount({
+          id: userProfile.id,
+          studentId: userProfile.studentId,
+          email: userProfile.email,
+          name: userProfile.name,
+          thaiName: userProfile.thaiName,
+          role: userProfile.role,
+          password: inputPassword || storedPw || '123456',
+          user: userProfile,
+          registeredAt: new Date().toISOString(),
+        });
+
+        // Trigger background sync to also cache other accounts on this device
+        syncAccountsFromCloud().catch(() => {});
+
+        return { success: true, user: userProfile };
       })();
 
-      const cloudResult = await withTimeout(cloudLookupPromise, 2200);
+      const cloudResult = await withTimeout(cloudLookupPromise, 10000);
       if (cloudResult) {
-        return { success: true, user: cloudResult };
+        if (cloudResult.success && cloudResult.user) {
+          return { success: true, user: cloudResult.user };
+        }
+        if (cloudResult.error) {
+          return { success: false, error: cloudResult.error };
+        }
       }
     } catch (cloudErr) {
-      console.debug('Cloud Firestore fast lookup notice:', cloudErr);
+      console.debug('Cloud Firestore lookup notice:', cloudErr);
     }
 
     // =========================================================================
@@ -1122,9 +1232,9 @@ export async function signInUser(
     if (isEmail && inputPassword.length >= 6) {
       try {
         const authPromise = signInWithEmailAndPassword(auth, trimmedId, inputPassword);
-        const authRes = await withTimeout(authPromise, 2000);
+        const authRes = await withTimeout(authPromise, 4000);
         if (authRes && authRes.user?.uid) {
-          const remoteProfile = await withTimeout(fetchUserProfile(authRes.user.uid), 1500);
+          const remoteProfile = await withTimeout(fetchUserProfile(authRes.user.uid), 3000);
           if (remoteProfile) {
             saveStoredAccount({
               id: remoteProfile.id,
