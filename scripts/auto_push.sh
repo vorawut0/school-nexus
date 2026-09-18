@@ -8,6 +8,19 @@ if [ -z "$REMOTE_URL" ]; then
   exit 1
 fi
 
+# Detect token if available (environment variable or local token file)
+PUSH_URL="$REMOTE_URL"
+if [ -n "$GITHUB_TOKEN" ]; then
+  PUSH_URL="https://${GITHUB_TOKEN}@github.com/vorawut0/school-nexus.git"
+elif [ -n "$GH_TOKEN" ]; then
+  PUSH_URL="https://${GH_TOKEN}@github.com/vorawut0/school-nexus.git"
+elif [ -f .github_token ]; then
+  TOKEN=$(cat .github_token | tr -d '[:space:]')
+  if [ -n "$TOKEN" ]; then
+    PUSH_URL="https://${TOKEN}@github.com/vorawut0/school-nexus.git"
+  fi
+fi
+
 echo "🚀 Syncing changes to GitHub repository (vorawut0/school-nexus)..."
 
 git config user.name "vorawut0"
@@ -22,8 +35,14 @@ else
   git commit -m "$COMMIT_MSG"
 fi
 
-git push origin main
-echo "✅ Source code pushed to 'main' branch."
+echo "Pushing to 'main' branch..."
+if git push "$PUSH_URL" main; then
+  echo "✅ Source code pushed to 'main' branch."
+else
+  echo "⚠️ Git Push failed due to missing GitHub credentials (Personal Access Token)."
+  echo "👉 To enable automatic push, set your token with: git remote set-url origin https://<YOUR_GITHUB_TOKEN>@github.com/vorawut0/school-nexus.git"
+  exit 128
+fi
 
 # 2. Build production web app for GitHub Pages
 echo "📦 Building production web app for GitHub Pages..."
@@ -39,8 +58,7 @@ git config user.name "vorawut0"
 git config user.email "vorawutphetrai17@gmail.com"
 git add -A
 git commit -m "deploy: build and deploy SchoolNexus to GitHub Pages [$(date '+%Y-%m-%d %H:%M:%S')]"
-git remote add origin "$REMOTE_URL"
-git push -u origin gh-pages --force
+git push -u "$PUSH_URL" gh-pages --force
 cd ..
 
 echo "🎉 All Done! Web App is live at: https://vorawut0.github.io/school-nexus/"
