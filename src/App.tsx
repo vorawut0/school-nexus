@@ -81,6 +81,7 @@ import {
   savePersistedCardTheme,
   getStoredCustomPresets,
   getStoredAccounts,
+  ensureCompleteUserProfile,
   purgeAccountImmediately,
   addSecurityAuditLog,
   checkGoogleEmailRegistered,
@@ -135,13 +136,7 @@ export default function App() {
         if (sessionActive === 'true' && sessionUserRaw) {
           const parsed = JSON.parse(sessionUserRaw) as UserProfile;
           if (parsed && parsed.id) {
-            const customAvatar = getPersistedAvatar(parsed);
-            const customTheme = getPersistedCardTheme(parsed);
-            return {
-              ...parsed,
-              avatar: customAvatar || parsed.avatar,
-              cardTheme: customTheme || parsed.cardTheme || 'obsidian-gold',
-            };
+            return ensureCompleteUserProfile(parsed, parsed.role);
           }
         }
       }
@@ -262,13 +257,7 @@ export default function App() {
         try {
           const check = await checkGoogleEmailRegistered(firebaseUser.email, firebaseUser.uid);
           if (check.exists && check.user) {
-            const customAvatar = getPersistedAvatar(check.user);
-            const customTheme = getPersistedCardTheme(check.user);
-            const fullProfile: UserProfile = {
-              ...check.user,
-              avatar: customAvatar || check.user.avatar,
-              cardTheme: customTheme || check.user.cardTheme || 'obsidian-gold',
-            };
+            const fullProfile = ensureCompleteUserProfile(check.user, check.user.role);
             setUser(fullProfile);
             if (typeof sessionStorage !== 'undefined') {
               sessionStorage.setItem('sn_session_active', 'true');
@@ -505,13 +494,7 @@ export default function App() {
   };
 
   const handleLoginSuccess = (loggedInUser: UserProfile) => {
-    const customAvatar = getPersistedAvatar(loggedInUser);
-    const customTheme = getPersistedCardTheme(loggedInUser);
-    const finalUser: UserProfile = {
-      ...loggedInUser,
-      avatar: customAvatar || loggedInUser.avatar,
-      cardTheme: customTheme || loggedInUser.cardTheme || 'obsidian-gold',
-    };
+    const finalUser = ensureCompleteUserProfile(loggedInUser, loggedInUser.role);
     setUser(finalUser);
     setCurrentTab('dashboard');
     try {
@@ -559,8 +542,7 @@ export default function App() {
     const registered = getStoredAccounts();
     const foundForRole = registered.find((a) => a.role === role);
     if (foundForRole) {
-      const customAvatar = getPersistedAvatar(foundForRole.user);
-      const updatedUser = customAvatar ? { ...foundForRole.user, avatar: customAvatar } : foundForRole.user;
+      const updatedUser = ensureCompleteUserProfile(foundForRole.user, role);
       setUser(updatedUser);
       setCurrentTab('dashboard');
 
